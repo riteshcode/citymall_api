@@ -1,0 +1,830 @@
+{
+  "info": {
+    "_postman_id": "9f2b6f1a-2b3a-4c1d-9e3a-aali-market-api",
+    "name": "Aali Market API",
+    "description": "Price-first mobile shopping API for small-town India. All money is integer paise. Bilingual fields are { en, hi }. Every response is { success, data, error }.\n\nFlow to try this collection end to end:\n1. Auth > Send OTP, check the server console for the printed code (SMS_PROVIDER=console in dev), then Auth > Verify OTP (auto-saves accessToken/refreshToken).\n2. Catalog > List Categories / List Products (auto-saves categoryId/productId/productSlug).\n3. Cart > Add Item, Apply Coupon (code AALI50, needs subtotal >= ₹199).\n4. Addresses > Create Address (auto-saves addressId).\n5. Orders > Create Order (auto-saves orderId) — Idempotency-Key header uses the {{$guid}} dynamic variable, so re-sending the exact same request body+key replays the same order.\n6. Admin folder uses its own adminAccessToken — Send/Verify OTP with the seeded admin mobile (9999999999 by default).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "serverRoot", "value": "http://localhost:4000", "type": "string" },
+    { "key": "baseUrl", "value": "{{serverRoot}}/api/v1", "type": "string" },
+    { "key": "mobile", "value": "9876543210", "type": "string" },
+    { "key": "otpCode", "value": "", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "adminMobile", "value": "9999999999", "type": "string" },
+    { "key": "adminOtpCode", "value": "", "type": "string" },
+    { "key": "adminAccessToken", "value": "", "type": "string" },
+    { "key": "adminRefreshToken", "value": "", "type": "string" },
+    { "key": "categoryId", "value": "", "type": "string" },
+    { "key": "productId", "value": "", "type": "string" },
+    { "key": "productSlug", "value": "", "type": "string" },
+    { "key": "couponCode", "value": "AALI50", "type": "string" },
+    { "key": "addressId", "value": "", "type": "string" },
+    { "key": "orderId", "value": "", "type": "string" },
+    { "key": "bannerId", "value": "", "type": "string" },
+    { "key": "createdProductId", "value": "", "type": "string" },
+    { "key": "createdCategoryId", "value": "", "type": "string" },
+    { "key": "createdCouponId", "value": "", "type": "string" },
+    { "key": "createdBannerId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"mobile\":\"{{mobile}}\",\"purpose\":\"login\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/auth/otp/send", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "send"] },
+            "description": "Rate-limited to 3 sends / 15 min / mobile. In dev (SMS_PROVIDER=console) the code is printed to the server console, not sent via SMS."
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200 or 201', function () { pm.expect([200, 201]).to.include(pm.response.code); });",
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "  console.log('Saved accessToken for user', json.data.user && json.data.user.mobile);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"mobile\":\"{{mobile}}\",\"code\":\"{{otpCode}}\",\"purpose\":\"login\",\"name\":\"Ritesh\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/auth/otp/verify", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "verify"] },
+            "description": "Set collection variable {{otpCode}} to the value printed in the server console before sending. Creates the user on first verify. Auto-saves accessToken/refreshToken."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"refreshToken\":\"{{refreshToken}}\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"refreshToken\":\"{{refreshToken}}\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["auth", "logout"] }
+          }
+        },
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/me", "host": ["{{baseUrl}}"], "path": ["me"] }
+          }
+        },
+        {
+          "name": "Update Me",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"name\":\"Ritesh Kumar\",\"email\":\"ritesh@example.com\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/me", "host": ["{{baseUrl}}"], "path": ["me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catalog",
+      "item": [
+        {
+          "name": "List Categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.length) { pm.collectionVariables.set('categoryId', json.data[0].id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/categories", "host": ["{{baseUrl}}"], "path": ["categories"] }
+          }
+        },
+        {
+          "name": "List Banners",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/banners", "host": ["{{baseUrl}}"], "path": ["banners"] }
+          }
+        },
+        {
+          "name": "List Products",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.length) {",
+                  "  pm.collectionVariables.set('productId', json.data[0].id);",
+                  "  pm.collectionVariables.set('productSlug', json.data[0].slug);",
+                  "}",
+                  "pm.test('has pagination meta', function () { pm.expect(json.meta).to.have.property('total'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products?page=1&limit=20&sort=newest",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "sort", "value": "newest" },
+                { "key": "category", "value": "{{categoryId}}", "disabled": true },
+                { "key": "minPrice", "value": "0", "disabled": true },
+                { "key": "maxPrice", "value": "100000", "disabled": true },
+                { "key": "brand", "value": "", "disabled": true },
+                { "key": "rating", "value": "4", "disabled": true },
+                { "key": "inStock", "value": "true", "disabled": true },
+                { "key": "q", "value": "atta", "disabled": true }
+              ]
+            },
+            "description": "sort: popular | price_asc | price_desc | newest | discount"
+          }
+        },
+        {
+          "name": "Get Product by Slug",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/products/{{productSlug}}", "host": ["{{baseUrl}}"], "path": ["products", "{{productSlug}}"] }
+          }
+        },
+        {
+          "name": "Get Related Products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}/related?limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["products", "{{productId}}", "related"],
+              "query": [{ "key": "limit", "value": "10" }]
+            }
+          }
+        },
+        {
+          "name": "List Product Reviews",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}/reviews?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["products", "{{productId}}", "reviews"],
+              "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "20" }]
+            }
+          }
+        },
+        {
+          "name": "Create Product Review",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"rating\":5,\"comment\":\"Great quality and fast delivery.\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/products/{{productId}}/reviews", "host": ["{{baseUrl}}"], "path": ["products", "{{productId}}", "reviews"] },
+            "description": "Requires the user to have a DELIVERED order containing this product — otherwise returns REVIEW_REQUIRES_DELIVERED_ORDER."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cart",
+      "item": [
+        {
+          "name": "Get Cart",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/cart", "host": ["{{baseUrl}}"], "path": ["cart"] }
+          }
+        },
+        {
+          "name": "Add Item",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"productId\":\"{{productId}}\",\"qty\":2}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/cart/items", "host": ["{{baseUrl}}"], "path": ["cart", "items"] }
+          }
+        },
+        {
+          "name": "Update Item Qty",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"qty\":3}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/cart/items/{{productId}}", "host": ["{{baseUrl}}"], "path": ["cart", "items", "{{productId}}"] },
+            "description": "qty: 0 removes the item"
+          }
+        },
+        {
+          "name": "Remove Item",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/cart/items/{{productId}}", "host": ["{{baseUrl}}"], "path": ["cart", "items", "{{productId}}"] }
+          }
+        },
+        {
+          "name": "Apply Coupon",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"code\":\"{{couponCode}}\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/cart/coupon", "host": ["{{baseUrl}}"], "path": ["cart", "coupon"] },
+            "description": "AALI50 needs a subtotal of at least ₹199 (19900 paise). Errors: COUPON_NOT_FOUND, COUPON_INACTIVE, COUPON_EXPIRED, COUPON_NOT_STARTED, COUPON_MIN_ORDER, COUPON_USAGE_LIMIT_REACHED, COUPON_PER_USER_LIMIT_REACHED, CART_EMPTY."
+          }
+        },
+        {
+          "name": "Remove Coupon",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/cart/coupon", "host": ["{{baseUrl}}"], "path": ["cart", "coupon"] }
+          }
+        },
+        {
+          "name": "Clear Cart",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/cart", "host": ["{{baseUrl}}"], "path": ["cart"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Addresses",
+      "item": [
+        {
+          "name": "List Addresses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/addresses", "host": ["{{baseUrl}}"], "path": ["addresses"] }
+          }
+        },
+        {
+          "name": "Create Address",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set('addressId', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"label\":\"Home\",\"line1\":\"123 MG Road\",\"line2\":\"Near Bus Stand\",\"landmark\":\"Opposite Petrol Pump\",\"city\":\"Sitapur\",\"state\":\"Uttar Pradesh\",\"pincode\":\"261001\",\"isDefault\":true}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/addresses", "host": ["{{baseUrl}}"], "path": ["addresses"] }
+          }
+        },
+        {
+          "name": "Update Address",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"landmark\":\"Near City Hospital\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/addresses/{{addressId}}", "host": ["{{baseUrl}}"], "path": ["addresses", "{{addressId}}"] }
+          }
+        },
+        {
+          "name": "Set Default Address",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/addresses/{{addressId}}/default", "host": ["{{baseUrl}}"], "path": ["addresses", "{{addressId}}", "default"] }
+          }
+        },
+        {
+          "name": "Delete Address",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/addresses/{{addressId}}", "host": ["{{baseUrl}}"], "path": ["addresses", "{{addressId}}"] }
+          }
+        },
+        {
+          "name": "Check Serviceability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/serviceability?pincode=261001",
+              "host": ["{{baseUrl}}"],
+              "path": ["serviceability"],
+              "query": [{ "key": "pincode", "value": "261001" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Create Order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set('orderId', json.data.id);",
+                  "  console.log('Order created:', json.data.orderNumber);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{$guid}}", "description": "Re-sending the same key + body replays the original order instead of creating a duplicate." }
+            ],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"addressId\":\"{{addressId}}\",\"paymentMethod\":\"cod\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/orders", "host": ["{{baseUrl}}"], "path": ["orders"] },
+            "description": "paymentMethod: cod | upi | card | netbanking. Re-validates stock/price/coupon and decrements stock inside a transaction."
+          }
+        },
+        {
+          "name": "List Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": {
+              "raw": "{{baseUrl}}/orders?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders"],
+              "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "20" }]
+            }
+          }
+        },
+        {
+          "name": "Get Order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/orders/{{orderId}}", "host": ["{{baseUrl}}"], "path": ["orders", "{{orderId}}"] },
+            "description": "Includes statusHistory for the tracking screen."
+          }
+        },
+        {
+          "name": "Cancel Order",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"reason\":\"Changed my mind\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/orders/{{orderId}}/cancel", "host": ["{{baseUrl}}"], "path": ["orders", "{{orderId}}", "cancel"] },
+            "description": "Only while status is placed/confirmed/packed — otherwise ORDER_NOT_CANCELLABLE."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Webhook (mock payment captured)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-webhook-signature", "value": "dev-signature", "description": "mock provider accepts any non-empty signature; razorpay provider verifies HMAC-SHA256 against RAZORPAY_WEBHOOK_SECRET" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"orderId\":\"order_mock_replace_with_paymentProviderOrderId\",\"status\":\"captured\"}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{baseUrl}}/payments/webhook", "host": ["{{baseUrl}}"], "path": ["payments", "webhook"] },
+            "description": "Set orderId to the paymentProviderOrderId returned on an order placed with a non-COD paymentMethod. Body is read as raw bytes server-side for signature verification, then parsed as JSON."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wishlist",
+      "item": [
+        {
+          "name": "Get Wishlist",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/wishlist", "host": ["{{baseUrl}}"], "path": ["wishlist"] }
+          }
+        },
+        {
+          "name": "Add to Wishlist",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/wishlist/{{productId}}", "host": ["{{baseUrl}}"], "path": ["wishlist", "{{productId}}"] }
+          }
+        },
+        {
+          "name": "Remove from Wishlist",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}" }] },
+            "url": { "raw": "{{baseUrl}}/wishlist/{{productId}}", "host": ["{{baseUrl}}"], "path": ["wishlist", "{{productId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Admin - Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"mobile\":\"{{adminMobile}}\",\"purpose\":\"login\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/auth/otp/send", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "send"] },
+            "description": "adminMobile defaults to 9999999999 (SEED_ADMIN_MOBILE) — must already exist via `npm run seed`."
+          }
+        },
+        {
+          "name": "Admin - Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ([200, 201].includes(pm.response.code)) {",
+                  "  var json = pm.response.json();",
+                  "  pm.collectionVariables.set('adminAccessToken', json.data.accessToken);",
+                  "  pm.collectionVariables.set('adminRefreshToken', json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"mobile\":\"{{adminMobile}}\",\"code\":\"{{adminOtpCode}}\",\"purpose\":\"login\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/auth/otp/verify", "host": ["{{baseUrl}}"], "path": ["auth", "otp", "verify"] },
+            "description": "Set {{adminOtpCode}} from the server console before sending."
+          }
+        },
+        {
+          "name": "Products",
+          "item": [
+            {
+              "name": "Create Product",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) { pm.collectionVariables.set('createdProductId', pm.response.json().data.id); }"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"title\":{\"en\":\"Test Rice 1kg\",\"hi\":\"टेस्ट चावल 1 किलो\"},\"slug\":\"test-rice-1kg\",\"description\":{\"en\":\"Premium test rice, 1 kg pack.\",\"hi\":\"प्रीमियम टेस्ट चावल, 1 किलो पैक।\"},\"category\":\"{{categoryId}}\",\"brand\":\"Aali\",\"images\":[],\"mrp\":9900,\"price\":8500,\"unit\":\"1 kg\",\"stock\":100,\"tags\":[\"rice\",\"staple\"],\"isActive\":true}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{baseUrl}}/admin/products", "host": ["{{baseUrl}}"], "path": ["admin", "products"] },
+                "description": "mrp/price are integer paise. category must be a real Category id — run Catalog > List Categories first."
+              }
+            },
+            {
+              "name": "Update Product",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "body": { "mode": "raw", "raw": "{\"price\":7900,\"stock\":80}", "options": { "raw": { "language": "json" } } },
+                "url": { "raw": "{{baseUrl}}/admin/products/{{createdProductId}}", "host": ["{{baseUrl}}"], "path": ["admin", "products", "{{createdProductId}}"] }
+              }
+            },
+            {
+              "name": "Delete Product",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "url": { "raw": "{{baseUrl}}/admin/products/{{createdProductId}}", "host": ["{{baseUrl}}"], "path": ["admin", "products", "{{createdProductId}}"] },
+                "description": "Soft-delete: sets isActive=false."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Categories",
+          "item": [
+            {
+              "name": "Create Category",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) { pm.collectionVariables.set('createdCategoryId', pm.response.json().data.id); }"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"name\":{\"en\":\"Test Category\",\"hi\":\"टेस्ट श्रेणी\"},\"slug\":\"test-category\",\"icon\":\"\",\"image\":\"\",\"sortOrder\":99,\"isActive\":true}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{baseUrl}}/admin/categories", "host": ["{{baseUrl}}"], "path": ["admin", "categories"] }
+              }
+            },
+            {
+              "name": "Update Category",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "body": { "mode": "raw", "raw": "{\"sortOrder\":1}", "options": { "raw": { "language": "json" } } },
+                "url": { "raw": "{{baseUrl}}/admin/categories/{{createdCategoryId}}", "host": ["{{baseUrl}}"], "path": ["admin", "categories", "{{createdCategoryId}}"] }
+              }
+            },
+            {
+              "name": "Delete Category",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "url": { "raw": "{{baseUrl}}/admin/categories/{{createdCategoryId}}", "host": ["{{baseUrl}}"], "path": ["admin", "categories", "{{createdCategoryId}}"] },
+                "description": "Soft-delete: sets isActive=false."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Coupons",
+          "item": [
+            {
+              "name": "List Coupons",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "url": { "raw": "{{baseUrl}}/admin/coupons", "host": ["{{baseUrl}}"], "path": ["admin", "coupons"] }
+              }
+            },
+            {
+              "name": "Create Coupon",
+              "event": [
+                {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var now = new Date();",
+                      "var expires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);",
+                      "pm.variables.set('nowIso', now.toISOString());",
+                      "pm.variables.set('expiresIso', expires.toISOString());"
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) { pm.collectionVariables.set('createdCouponId', pm.response.json().data.id); }"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"code\":\"TESTPCT10\",\"type\":\"percent\",\"value\":10,\"minOrderValue\":9900,\"maxDiscount\":10000,\"startsAt\":\"{{nowIso}}\",\"expiresAt\":\"{{expiresIso}}\",\"usageLimit\":100,\"perUserLimit\":1,\"isActive\":true}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{baseUrl}}/admin/coupons", "host": ["{{baseUrl}}"], "path": ["admin", "coupons"] },
+                "description": "type: flat (value = paise off) | percent (value = whole % , capped by maxDiscount paise)."
+              }
+            },
+            {
+              "name": "Update Coupon",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "body": { "mode": "raw", "raw": "{\"isActive\":false}", "options": { "raw": { "language": "json" } } },
+                "url": { "raw": "{{baseUrl}}/admin/coupons/{{createdCouponId}}", "host": ["{{baseUrl}}"], "path": ["admin", "coupons", "{{createdCouponId}}"] }
+              }
+            },
+            {
+              "name": "Delete Coupon",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "url": { "raw": "{{baseUrl}}/admin/coupons/{{createdCouponId}}", "host": ["{{baseUrl}}"], "path": ["admin", "coupons", "{{createdCouponId}}"] },
+                "description": "Soft-delete: sets isActive=false."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Banners",
+          "item": [
+            {
+              "name": "Create Banner",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) { pm.collectionVariables.set('createdBannerId', pm.response.json().data.id); }"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"title\":{\"en\":\"Monsoon Sale\",\"hi\":\"मानसून सेल\"},\"image\":\"https://example.com/banner.jpg\",\"link\":\"/category/grocery-staples\",\"sortOrder\":1,\"isActive\":true}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": { "raw": "{{baseUrl}}/admin/banners", "host": ["{{baseUrl}}"], "path": ["admin", "banners"] }
+              }
+            },
+            {
+              "name": "Update Banner",
+              "request": {
+                "method": "PATCH",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "body": { "mode": "raw", "raw": "{\"sortOrder\":2}", "options": { "raw": { "language": "json" } } },
+                "url": { "raw": "{{baseUrl}}/admin/banners/{{createdBannerId}}", "host": ["{{baseUrl}}"], "path": ["admin", "banners", "{{createdBannerId}}"] }
+              }
+            },
+            {
+              "name": "Delete Banner",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+                "url": { "raw": "{{baseUrl}}/admin/banners/{{createdBannerId}}", "host": ["{{baseUrl}}"], "path": ["admin", "banners", "{{createdBannerId}}"] },
+                "description": "Soft-delete: sets isActive=false."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Order Status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+            "body": { "mode": "raw", "raw": "{\"status\":\"confirmed\",\"note\":\"Payment verified, packing started\"}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/admin/orders/{{orderId}}/status", "host": ["{{baseUrl}}"], "path": ["admin", "orders", "{{orderId}}", "status"] },
+            "description": "status: placed | confirmed | packed | shipped | out_for_delivery | delivered | cancelled"
+          }
+        },
+        {
+          "name": "Upload Images",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}" }] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "images", "type": "file", "src": [] },
+                { "key": "images", "type": "file", "src": [] }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/admin/uploads", "host": ["{{baseUrl}}"], "path": ["admin", "uploads"] },
+            "description": "Field name must be \"images\" (max 6 files, 5 MB each, jpeg/png/webp/avif). Select actual files in the Body tab before sending — Postman collections can't embed binary files."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{serverRoot}}/health", "host": ["{{serverRoot}}"], "path": ["health"] },
+            "description": "Not under API_BASE_PATH — lives at the server root."
+          }
+        }
+      ]
+    }
+  ]
+}
