@@ -693,6 +693,10 @@ paths:
       tags: [Admin]
       summary: Upload one or more product/category/banner images (multipart, field "images")
       security: [{ bearerAuth: [] }]
+      description: >
+        Streams up to 6 images (field `images`, jpeg/png/webp/avif, max 5 MB each) to Cloudinary (folder aali-market/products).
+        Originals are capped at 1000x1000 and recompressed; the returned URLs carry `f_auto,q_auto` so browsers get AVIF/WebP.
+        All-or-nothing; urls are in file order. STORAGE_PROVIDER=s3 switches to the legacy S3 provider.
       requestBody:
         content:
           multipart/form-data:
@@ -703,7 +707,11 @@ paths:
                   type: array
                   items: { type: string, format: binary }
       responses:
-        '201': { description: 'Created - returns { urls: string[] }' }
+        '201': { description: 'Created - returns { urls: string[] } (https://res.cloudinary.com/...)' }
+        '400': { description: 'VALIDATION_ERROR (type / count / field name) | UPLOAD_FAILED (Cloudinary rejected the file)' }
+        '413': { description: FILE_TOO_LARGE }
+        '502': { description: UPLOAD_FAILED (storage provider error) }
+        '503': { description: UPLOAD_FAILED (storage not configured) }
 
   /products/suggest:
     get:

@@ -3,6 +3,10 @@
  * right bilingual message. Keep names stable — clients switch on them.
  */
 export const ErrorCodes = {
+  // Uploads
+  UPLOAD_FAILED: 'UPLOAD_FAILED',
+  FILE_TOO_LARGE: 'FILE_TOO_LARGE',
+
   // Generic
   VALIDATION_ERROR: 'VALIDATION_ERROR',
   NOT_FOUND: 'NOT_FOUND',

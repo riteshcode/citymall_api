@@ -25,7 +25,7 @@ Everything below the overview is copied verbatim from the repo by \`npm run refe
 | Port | \`PORT\` env, default **4000** |
 | Base path | \`API_BASE_PATH\` env, default **/api/v1**. \`/health\` is at the server root. |
 | CORS | \`cors({ origin: env.cors.origin })\`; \`CORS_ORIGIN\` default \`*\`. One string only — a comma-separated list is **not** split into several origins. |
-| Uploaded images | No \`/uploads\` path, no static serving. \`POST /admin/uploads\` → S3-compatible storage → absolute URLs \`{S3_PUBLIC_BASE_URL}/products/<uuid>.<ext>\` (\`201 { data: { urls: [...] } }\`). |
+| Uploaded images | No \`/uploads\` path, no static serving. \`POST /admin/uploads\` (multipart field \`images\`, max 6, 5 MB each) → Cloudinary (\`STORAGE_PROVIDER=cloudinary\`, default; \`s3\` still available) → \`201 { success, data: { urls: ["https://res.cloudinary.com/<cloud>/image/upload/f_auto,q_auto/v<n>/aali-market/products/<id>"] }, error: null }\`. Errors: \`VALIDATION_ERROR\`, \`FILE_TOO_LARGE\` (413), \`UPLOAD_FAILED\` (400/502/503). |
 | User roles | \`User.role\` ∈ \`customer\` \\| \`admin\` (default \`customer\`) |
 | Admin check | \`authenticate\` verifies the JWT and loads the user from the DB each request; \`requireRole('admin')\` compares the DB role (not the token claim). |
 | Money | integer **paise** everywhere (₹1 = 100) |

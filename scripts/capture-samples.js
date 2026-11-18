@@ -174,7 +174,7 @@ const md = [
   '',
   `Captured by \`npm run samples\` (scripts/capture-samples.js) — the actual app, in-memory MongoDB, seed data. IDs/timestamps/tokens differ on every run. Arrays are trimmed to ${MAX_ARRAY} items for readability.`,
   '',
-  '> **Not captured:** `POST /admin/uploads` — it uploads to real S3, which needs credentials. Its response shape is documented in docs/BACKEND_REFERENCE.md.',
+  '> **Not captured:** `POST /admin/uploads` — it uploads to real Cloudinary, which needs credentials. Shape: `201 { "success": true, "data": { "urls": ["https://res.cloudinary.com/<cloud>/image/upload/f_auto,q_auto/v<n>/aali-market/products/<id>"] }, "error": null }` (see docs/BACKEND_REFERENCE.md; the request/response handling is covered by tests/upload.test.js against a stand-in Cloudinary server).',
   '',
 ];
 for (const s of samples) {

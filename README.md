@@ -55,7 +55,7 @@ See [`.env.example`](.env.example) for the full list with defaults. Key groups:
 | Database | `MONGO_URI` |
 | JWT | access/refresh secrets + expiry |
 | OTP | length, TTL, max attempts, send rate limit, `SMS_PROVIDER` |
-| S3 | S3-compatible object storage for product/category/banner images |
+| Storage | `STORAGE_PROVIDER` (`cloudinary` default \| `s3`), `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` (S3_* only if `s3`). The server boots without them; uploads then fail with `UPLOAD_FAILED` |
 | Payments | `PAYMENT_PROVIDER` (`mock` or `razorpay`-shaped), webhook secret |
 | Pricing | default delivery fee, free-delivery threshold, handling fee (all in paise) |
 | Seed | admin user identity created by `npm run seed` |
@@ -71,7 +71,7 @@ src/
   services/     business logic — pricing, cart, coupons, otp, auth, orders, payments, reviews
   middleware/   auth, validate (zod), errorHandler, rateLimit, upload (multer)
   validations/  zod schemas per resource, `.strict()` so unknown fields are rejected
-  utils/        ApiError, ApiResponse, jwt, money (paise helpers), mongoose plugins, s3
+  utils/        ApiError, ApiResponse, jwt, money (paise helpers), mongoose plugins, s3 (legacy provider)
   seed/         seed script + fixture data
 tests/          Jest + Supertest, mongodb-memory-server (replica set)
 docs/openapi.yaml
@@ -168,7 +168,7 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | POST/PATCH/DELETE | `/admin/banners`, `/admin/banners/:id` | Banner CRUD |
 | GET/PATCH | `/admin/settings` | Delivery fee, free-delivery threshold, handling fee, min order value, store open/closed, timings |
 | GET/POST/PATCH/DELETE | `/admin/pincodes`, `/admin/pincodes/:id` | Serviceable areas `{ pincode, areaName{en,hi}, isActive, deliveryFee?, etaDays }` (DELETE = hard) |
-| POST | `/admin/uploads` | Upload images (multipart field `images`, max 6, 5 MB each) → S3 URLs |
+| POST | `/admin/uploads` | Upload images (multipart field `images`, max 6, 5 MB each, jpeg/png/webp/avif) → `201 { data: { urls: ["https://res.cloudinary.com/..."] } }` |
 
 #### Store settings & serviceable areas — behaviour worth knowing
 
@@ -206,3 +206,13 @@ Import both in Postman (`File → Import`), select the **Aali Market — Local**
 4. **Addresses → Create Address** (auto-saves `addressId`).
 5. **Orders → Create Order** (auto-saves `orderId`) — the `Idempotency-Key` header uses Postman's `{{$guid}}` dynamic variable per send.
 6. **Admin** folder uses its own `adminAccessToken` — run **Admin → Send OTP** / **Admin → Verify OTP** with the seeded admin mobile (`9999999999` by default) first.
+
+## Image uploads (Cloudinary)
+
+`POST /admin/uploads` streams the in-memory multer buffers to Cloudinary (`upload_stream`, nothing is written to disk) into the `aali-market/products` folder, in parallel, and returns the URLs in the same order as the files.
+
+- **Stored original:** capped at 1000×1000 (`c_limit`, never upscaled) and recompressed with `q_auto`, so large camera photos shrink.
+- **Returned URL:** `https://res.cloudinary.com/<cloud>/image/upload/f_auto,q_auto/v<version>/<public_id>` — `f_auto` lives in the *delivery URL*, so browsers automatically get AVIF/WebP/JPEG. (Cloudinary documents that `f_auto` must not be used in an incoming/upload transformation; format selection happens per request at the CDN.) Use the URL exactly as returned; resizing for thumbnails is just another URL segment, e.g. `/image/upload/w_300,c_fill,f_auto,q_auto/...`.
+- **Errors:** wrong type → `400 VALIDATION_ERROR`; file over 5 MB → `413 FILE_TOO_LARGE`; more than 6 files / wrong field name → `400 VALIDATION_ERROR`; Cloudinary rejects the file → `400 UPLOAD_FAILED`; Cloudinary down/misconfigured → `502`/`503 UPLOAD_FAILED`. Uploads are all-or-nothing: if one file of several fails, the ones that succeeded are deleted again.
+- **S3:** the old provider is still available with `STORAGE_PROVIDER=s3` (+ the `S3_*` variables). The AWS SDK is only loaded in that mode.
+- **Switching:** `STORAGE_PROVIDER` defaults to `cloudinary`, so a deployment that still relies on S3 must set `STORAGE_PROVIDER=s3`. URLs already stored in products/banners keep working — they're plain URLs.

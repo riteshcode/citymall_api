@@ -50,6 +50,19 @@ export const env = {
     max: toInt(process.env.RATE_LIMIT_MAX, 300),
   },
 
+  // Where POST /admin/uploads stores images: 'cloudinary' (default) or 's3'. Neither needs credentials to BOOT —
+  // a missing config only makes uploads fail (UPLOAD_FAILED), it never crashes the server.
+  storage: {
+    provider: (process.env.STORAGE_PROVIDER || 'cloudinary').trim().toLowerCase(),
+  },
+
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiSecret: process.env.CLOUDINARY_API_SECRET,
+  },
+
+  // Only used when STORAGE_PROVIDER=s3
   s3: {
     endpoint: process.env.S3_ENDPOINT,
     region: process.env.S3_REGION || 'ap-south-1',

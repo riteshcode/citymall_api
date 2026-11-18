@@ -2,7 +2,7 @@
 
 Captured by `npm run samples` (scripts/capture-samples.js) — the actual app, in-memory MongoDB, seed data. IDs/timestamps/tokens differ on every run. Arrays are trimmed to 2 items for readability.
 
-> **Not captured:** `POST /admin/uploads` — it uploads to real S3, which needs credentials. Its response shape is documented in docs/BACKEND_REFERENCE.md.
+> **Not captured:** `POST /admin/uploads` — it uploads to real Cloudinary, which needs credentials. Shape: `201 { "success": true, "data": { "urls": ["https://res.cloudinary.com/<cloud>/image/upload/f_auto,q_auto/v<n>/aali-market/products/<id>"] }, "error": null }` (see docs/BACKEND_REFERENCE.md; the request/response handling is covered by tests/upload.test.js against a stand-in Cloudinary server).
 
 ## POST /auth/otp/send
 
@@ -13,9 +13,9 @@ Captured by `npm run samples` (scripts/capture-samples.js) — the actual app, i
   "success": true,
   "data": {
     "mobile": "9876543210",
-    "expiresAt": "2026-11-14T07:12:36.807Z",
+    "expiresAt": "2026-11-18T09:11:50.163Z",
     "ttlMinutes": 5,
-    "code": "814566"
+    "code": "406394"
   },
   "error": null
 }
@@ -35,12 +35,12 @@ Captured by `npm run samples` (scripts/capture-samples.js) — the actual app, i
       "role": "customer",
       "isVerified": true,
       "addresses": [],
-      "createdAt": "2026-11-14T07:07:36.871Z",
-      "updatedAt": "2026-11-14T07:07:36.871Z",
-      "id": "6af808b84584c783f4070c1b"
+      "createdAt": "2026-11-18T09:06:50.226Z",
+      "updatedAt": "2026-11-18T09:06:50.226Z",
+      "id": "6afd6aaa9d90ebe96ec5daed"
     },
-    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YWY4MDhiODQ1ODRjNzgzZjQwNzBjMWIiLCJyb2xlIjoiY3VzdG9tZXIiLCJpYXQiOjE3OTQ2NDAwNTYsImV4cCI6MTc5NDY0MDk1Nn0.vFB7CAGaI_s2KxagRq4lx1O0OQeT9t4C_cwzs26kWdw",
-    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YWY4MDhiODQ1ODRjNzgzZjQwNzBjMWIiLCJyb2xlIjoiY3VzdG9tZXIiLCJpYXQiOjE3OTQ2NDAwNTYsImV4cCI6MTc5NzIzMjA1NiwianRpIjoiMGMzZjBhYWQtNWY0Yi00YTNlLTljNGUtZjM0MTFhY2ZmN2FkIn0.eV9-alsqTxTQdpVF6ROK8svZvEJufEGuUvQhQ6-IuF0",
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YWZkNmFhYTlkOTBlYmU5NmVjNWRhZWQiLCJyb2xlIjoiY3VzdG9tZXIiLCJpYXQiOjE3OTQ5OTI4MTAsImV4cCI6MTc5NDk5MzcxMH0.Afy8RVEUxYjeXHkfMLm7yAh1nUr_rJWpoVOdILeAXeo",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2YWZkNmFhYTlkOTBlYmU5NmVjNWRhZWQiLCJyb2xlIjoiY3VzdG9tZXIiLCJpYXQiOjE3OTQ5OTI4MTAsImV4cCI6MTc5NzU4NDgxMCwianRpIjoiZWJiMDk4MzAtMzllYS00OWYzLTk1NzQtZjhjMTk0MTg5Y2Y2In0.NhmamX68SsNgRwW4e85axZ9Khr1ETLVOVLuuuKfpILw",
     "isNewUser": true
   },
   "error": null
@@ -60,9 +60,9 @@ Captured by `npm run samples` (scripts/capture-samples.js) — the actual app, i
     "role": "customer",
     "isVerified": true,
     "addresses": [],
-    "createdAt": "2026-11-14T07:07:36.871Z",
-    "updatedAt": "2026-11-14T07:07:36.871Z",
-    "id": "6af808b84584c783f4070c1b"
+    "createdAt": "2026-11-18T09:06:50.226Z",
+    "updatedAt": "2026-11-18T09:06:50.226Z",
+    "id": "6afd6aaa9d90ebe96ec5daed"
   },
   "error": null
 }
@@ -88,9 +88,9 @@ _data has 8 items, showing first 2_
       "image": "",
       "sortOrder": 1,
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.475Z",
-      "updatedAt": "2026-11-14T07:07:36.475Z",
-      "id": "6af808b84584c783f4070b89"
+      "createdAt": "2026-11-18T09:06:49.821Z",
+      "updatedAt": "2026-11-18T09:06:49.821Z",
+      "id": "6afd6aa99d90ebe96ec5da5b"
     },
     {
       "name": {
@@ -102,9 +102,9 @@ _data has 8 items, showing first 2_
       "image": "",
       "sortOrder": 2,
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.498Z",
-      "updatedAt": "2026-11-14T07:07:36.498Z",
-      "id": "6af808b84584c783f4070b99"
+      "createdAt": "2026-11-18T09:06:49.842Z",
+      "updatedAt": "2026-11-18T09:06:49.842Z",
+      "id": "6afd6aa99d90ebe96ec5da6a"
     }
   ],
   "error": null
@@ -128,9 +128,9 @@ _data has 8 items, showing first 2_
       "link": "/category/grocery-staples",
       "sortOrder": 1,
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.892Z",
-      "updatedAt": "2026-11-14T07:07:36.892Z",
-      "id": "6af808b84584c783f4070c22"
+      "createdAt": "2026-11-18T09:06:50.248Z",
+      "updatedAt": "2026-11-18T09:06:50.248Z",
+      "id": "6afd6aaa9d90ebe96ec5daf4"
     }
   ],
   "error": null
@@ -155,7 +155,7 @@ _data has 8 items, showing first 2_
         "en": "Tomato — 1 kg, sourced fresh for Aali Market customers.",
         "hi": "टमाटर — 1 kg, आली मार्केट के ग्राहकों के लिए ताज़ा उपलब्ध।"
       },
-      "category": "6af808b84584c783f4070b89",
+      "category": "6afd6aa99d90ebe96ec5da5b",
       "brand": "Farm Fresh",
       "images": [],
       "mrp": 3500,
@@ -169,11 +169,11 @@ _data has 8 items, showing first 2_
         "vegetable"
       ],
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.530Z",
-      "updatedAt": "2026-11-14T07:07:36.530Z",
+      "createdAt": "2026-11-18T09:06:49.879Z",
+      "updatedAt": "2026-11-18T09:06:49.879Z",
       "discountPercent": 20,
       "inStock": true,
-      "id": "6af808b84584c783f4070bb9"
+      "id": "6afd6aa99d90ebe96ec5da8b"
     },
     {
       "title": {
@@ -185,7 +185,7 @@ _data has 8 items, showing first 2_
         "en": "Fresh Onion — 1 kg, sourced fresh for Aali Market customers.",
         "hi": "ताज़ा प्याज़ — 1 kg, आली मार्केट के ग्राहकों के लिए ताज़ा उपलब्ध।"
       },
-      "category": "6af808b84584c783f4070b89",
+      "category": "6afd6aa99d90ebe96ec5da5b",
       "brand": "Farm Fresh",
       "images": [],
       "mrp": 4000,
@@ -199,11 +199,11 @@ _data has 8 items, showing first 2_
         "vegetable"
       ],
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.525Z",
-      "updatedAt": "2026-11-14T07:07:36.525Z",
+      "createdAt": "2026-11-18T09:06:49.873Z",
+      "updatedAt": "2026-11-18T09:06:49.873Z",
       "discountPercent": 20,
       "inStock": true,
-      "id": "6af808b84584c783f4070bb5"
+      "id": "6afd6aa99d90ebe96ec5da87"
     }
   ],
   "error": null,
@@ -234,7 +234,7 @@ _data has 8 items, showing first 2_
         "en": "Aata (Whole Wheat Flour) — 5 kg, sourced fresh for Aali Market customers.",
         "hi": "आटा (गेहूं का आटा) — 5 kg, आली मार्केट के ग्राहकों के लिए ताज़ा उपलब्ध।"
       },
-      "category": "6af808b84584c783f4070ba6",
+      "category": "6afd6aa99d90ebe96ec5da74",
       "brand": "Aashirvaad",
       "images": [],
       "mrp": 27500,
@@ -249,11 +249,11 @@ _data has 8 items, showing first 2_
         "staple"
       ],
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.541Z",
-      "updatedAt": "2026-11-14T07:07:36.541Z",
+      "createdAt": "2026-11-18T09:06:49.891Z",
+      "updatedAt": "2026-11-18T09:06:49.891Z",
       "discountPercent": 9,
       "inStock": true,
-      "id": "6af808b84584c783f4070bc9"
+      "id": "6afd6aa99d90ebe96ec5da9b"
     }
   ],
   "error": null,
@@ -289,7 +289,7 @@ _data has 8 items, showing first 2_
         "hi": "किराना और राशन"
       },
       "slug": "grocery-staples",
-      "id": "6af808b84584c783f4070ba6"
+      "id": "6afd6aa99d90ebe96ec5da74"
     },
     "brand": "Aashirvaad",
     "images": [],
@@ -305,11 +305,11 @@ _data has 8 items, showing first 2_
       "staple"
     ],
     "isActive": true,
-    "createdAt": "2026-11-14T07:07:36.541Z",
-    "updatedAt": "2026-11-14T07:07:36.541Z",
+    "createdAt": "2026-11-18T09:06:49.891Z",
+    "updatedAt": "2026-11-18T09:06:49.891Z",
     "discountPercent": 9,
     "inStock": true,
-    "id": "6af808b84584c783f4070bc9"
+    "id": "6afd6aa99d90ebe96ec5da9b"
   },
   "error": null
 }
@@ -346,7 +346,7 @@ _data has 8 items, showing first 2_
   "success": true,
   "data": [
     {
-      "id": "6af808b84584c783f4070bc9",
+      "id": "6afd6aa99d90ebe96ec5da9b",
       "slug": "aata-whole-wheat-flour",
       "title": {
         "en": "Aata (Whole Wheat Flour)",
@@ -394,9 +394,9 @@ _data has 8 items, showing first 2_
     "state": "Uttar Pradesh",
     "pincode": "261001",
     "isDefault": true,
-    "createdAt": "2026-11-14T07:07:36.973Z",
-    "updatedAt": "2026-11-14T07:07:36.973Z",
-    "id": "6af808b84584c783f4070c41"
+    "createdAt": "2026-11-18T09:06:50.348Z",
+    "updatedAt": "2026-11-18T09:06:50.348Z",
+    "id": "6afd6aaa9d90ebe96ec5db13"
   },
   "error": null
 }
@@ -419,9 +419,9 @@ _data has 8 items, showing first 2_
       "state": "Uttar Pradesh",
       "pincode": "261001",
       "isDefault": true,
-      "createdAt": "2026-11-14T07:07:36.973Z",
-      "updatedAt": "2026-11-14T07:07:36.973Z",
-      "id": "6af808b84584c783f4070c41"
+      "createdAt": "2026-11-18T09:06:50.348Z",
+      "updatedAt": "2026-11-18T09:06:50.348Z",
+      "id": "6afd6aaa9d90ebe96ec5db13"
     }
   ],
   "error": null
@@ -477,7 +477,7 @@ _data has 8 items, showing first 2_
   "data": {
     "items": [
       {
-        "productId": "6af808b84584c783f4070bc9",
+        "productId": "6afd6aa99d90ebe96ec5da9b",
         "title": {
           "en": "Aata (Whole Wheat Flour)",
           "hi": "आटा (गेहूं का आटा)"
@@ -518,7 +518,7 @@ _data has 8 items, showing first 2_
   "data": {
     "items": [
       {
-        "productId": "6af808b84584c783f4070bc9",
+        "productId": "6afd6aa99d90ebe96ec5da9b",
         "title": {
           "en": "Aata (Whole Wheat Flour)",
           "hi": "आटा (गेहूं का आटा)"
@@ -557,11 +557,11 @@ _data has 8 items, showing first 2_
 {
   "success": true,
   "data": {
-    "orderNumber": "AALI261114939B19A5",
-    "user": "6af808b84584c783f4070c1b",
+    "orderNumber": "AALI261118778CDA4B",
+    "user": "6afd6aaa9d90ebe96ec5daed",
     "items": [
       {
-        "product": "6af808b84584c783f4070bc9",
+        "product": "6afd6aa99d90ebe96ec5da9b",
         "title": {
           "en": "Aata (Whole Wheat Flour)",
           "hi": "आटा (गेहूं का आटा)"
@@ -589,9 +589,9 @@ _data has 8 items, showing first 2_
       "state": "Uttar Pradesh",
       "pincode": "261001",
       "isDefault": true,
-      "createdAt": "2026-11-14T07:07:36.973Z",
-      "updatedAt": "2026-11-14T07:07:36.973Z",
-      "id": "6af808b84584c783f4070c41"
+      "createdAt": "2026-11-18T09:06:50.348Z",
+      "updatedAt": "2026-11-18T09:06:50.348Z",
+      "id": "6afd6aaa9d90ebe96ec5db13"
     },
     "paymentMethod": "cod",
     "paymentStatus": "pending",
@@ -599,18 +599,18 @@ _data has 8 items, showing first 2_
     "statusHistory": [
       {
         "status": "placed",
-        "at": "2026-11-14T07:07:37.039Z",
+        "at": "2026-11-18T09:06:50.410Z",
         "note": ""
       }
     ],
-    "expectedDeliveryAt": "2026-11-15T07:07:37.039Z",
+    "expectedDeliveryAt": "2026-11-19T09:06:50.410Z",
     "idempotencyKey": "sample-key-1",
     "paymentProviderOrderId": null,
     "paymentId": null,
     "cancelReason": null,
-    "createdAt": "2026-11-14T07:07:37.041Z",
-    "updatedAt": "2026-11-14T07:07:37.041Z",
-    "id": "6af808b94584c783f4070c70",
+    "createdAt": "2026-11-18T09:06:50.412Z",
+    "updatedAt": "2026-11-18T09:06:50.412Z",
+    "id": "6afd6aaa9d90ebe96ec5db42",
     "payment": null
   },
   "error": null
@@ -626,15 +626,15 @@ _data has 8 items, showing first 2_
   "success": true,
   "data": [
     {
-      "orderNumber": "AALI261114939B19A5",
-      "user": "6af808b84584c783f4070c1b",
+      "orderNumber": "AALI261118778CDA4B",
+      "user": "6afd6aaa9d90ebe96ec5daed",
       "items": [
         {
           "title": {
             "en": "Aata (Whole Wheat Flour)",
             "hi": "आटा (गेहूं का आटा)"
           },
-          "product": "6af808b84584c783f4070bc9",
+          "product": "6afd6aa99d90ebe96ec5da9b",
           "image": "",
           "unit": "5 kg",
           "price": 24900,
@@ -658,9 +658,9 @@ _data has 8 items, showing first 2_
         "state": "Uttar Pradesh",
         "pincode": "261001",
         "isDefault": true,
-        "createdAt": "2026-11-14T07:07:36.973Z",
-        "updatedAt": "2026-11-14T07:07:36.973Z",
-        "id": "6af808b84584c783f4070c41"
+        "createdAt": "2026-11-18T09:06:50.348Z",
+        "updatedAt": "2026-11-18T09:06:50.348Z",
+        "id": "6afd6aaa9d90ebe96ec5db13"
       },
       "paymentMethod": "cod",
       "paymentStatus": "pending",
@@ -668,23 +668,23 @@ _data has 8 items, showing first 2_
       "statusHistory": [
         {
           "status": "placed",
-          "at": "2026-11-14T07:07:37.039Z",
+          "at": "2026-11-18T09:06:50.410Z",
           "note": ""
         },
         {
           "status": "confirmed",
-          "at": "2026-11-14T07:07:37.052Z",
+          "at": "2026-11-18T09:06:50.425Z",
           "note": "Packing started"
         }
       ],
-      "expectedDeliveryAt": "2026-11-15T07:07:37.039Z",
+      "expectedDeliveryAt": "2026-11-19T09:06:50.410Z",
       "idempotencyKey": "sample-key-1",
       "paymentProviderOrderId": null,
       "paymentId": null,
       "cancelReason": null,
-      "createdAt": "2026-11-14T07:07:37.041Z",
-      "updatedAt": "2026-11-14T07:07:37.053Z",
-      "id": "6af808b94584c783f4070c70"
+      "createdAt": "2026-11-18T09:06:50.412Z",
+      "updatedAt": "2026-11-18T09:06:50.426Z",
+      "id": "6afd6aaa9d90ebe96ec5db42"
     }
   ],
   "error": null,
@@ -699,21 +699,21 @@ _data has 8 items, showing first 2_
 
 ## GET /orders/:id (statusHistory)
 
-`GET /api/v1/orders/6af808b94584c783f4070c70` → **200**
+`GET /api/v1/orders/6afd6aaa9d90ebe96ec5db42` → **200**
 
 ```json
 {
   "success": true,
   "data": {
-    "orderNumber": "AALI261114939B19A5",
-    "user": "6af808b84584c783f4070c1b",
+    "orderNumber": "AALI261118778CDA4B",
+    "user": "6afd6aaa9d90ebe96ec5daed",
     "items": [
       {
         "title": {
           "en": "Aata (Whole Wheat Flour)",
           "hi": "आटा (गेहूं का आटा)"
         },
-        "product": "6af808b84584c783f4070bc9",
+        "product": "6afd6aa99d90ebe96ec5da9b",
         "image": "",
         "unit": "5 kg",
         "price": 24900,
@@ -737,9 +737,9 @@ _data has 8 items, showing first 2_
       "state": "Uttar Pradesh",
       "pincode": "261001",
       "isDefault": true,
-      "createdAt": "2026-11-14T07:07:36.973Z",
-      "updatedAt": "2026-11-14T07:07:36.973Z",
-      "id": "6af808b84584c783f4070c41"
+      "createdAt": "2026-11-18T09:06:50.348Z",
+      "updatedAt": "2026-11-18T09:06:50.348Z",
+      "id": "6afd6aaa9d90ebe96ec5db13"
     },
     "paymentMethod": "cod",
     "paymentStatus": "pending",
@@ -747,23 +747,23 @@ _data has 8 items, showing first 2_
     "statusHistory": [
       {
         "status": "placed",
-        "at": "2026-11-14T07:07:37.039Z",
+        "at": "2026-11-18T09:06:50.410Z",
         "note": ""
       },
       {
         "status": "confirmed",
-        "at": "2026-11-14T07:07:37.052Z",
+        "at": "2026-11-18T09:06:50.425Z",
         "note": "Packing started"
       }
     ],
-    "expectedDeliveryAt": "2026-11-15T07:07:37.039Z",
+    "expectedDeliveryAt": "2026-11-19T09:06:50.410Z",
     "idempotencyKey": "sample-key-1",
     "paymentProviderOrderId": null,
     "paymentId": null,
     "cancelReason": null,
-    "createdAt": "2026-11-14T07:07:37.041Z",
-    "updatedAt": "2026-11-14T07:07:37.053Z",
-    "id": "6af808b94584c783f4070c70"
+    "createdAt": "2026-11-18T09:06:50.412Z",
+    "updatedAt": "2026-11-18T09:06:50.426Z",
+    "id": "6afd6aaa9d90ebe96ec5db42"
   },
   "error": null
 }
@@ -771,20 +771,20 @@ _data has 8 items, showing first 2_
 
 ## POST /products/:id/reviews
 
-`POST /api/v1/products/6af808b84584c783f4070bc9/reviews` → **201**
+`POST /api/v1/products/6afd6aa99d90ebe96ec5da9b/reviews` → **201**
 
 ```json
 {
   "success": true,
   "data": {
-    "user": "6af808b84584c783f4070c1b",
-    "product": "6af808b84584c783f4070bc9",
-    "order": "6af808b94584c783f4070c70",
+    "user": "6afd6aaa9d90ebe96ec5daed",
+    "product": "6afd6aa99d90ebe96ec5da9b",
+    "order": "6afd6aaa9d90ebe96ec5db42",
     "rating": 5,
     "comment": "Great quality atta.",
-    "createdAt": "2026-11-14T07:07:37.082Z",
-    "updatedAt": "2026-11-14T07:07:37.082Z",
-    "id": "6af808b94584c783f4070c88"
+    "createdAt": "2026-11-18T09:06:50.454Z",
+    "updatedAt": "2026-11-18T09:06:50.454Z",
+    "id": "6afd6aaa9d90ebe96ec5db5a"
   },
   "error": null
 }
@@ -792,7 +792,7 @@ _data has 8 items, showing first 2_
 
 ## GET /products/:id/reviews
 
-`GET /api/v1/products/6af808b84584c783f4070bc9/reviews` → **200**
+`GET /api/v1/products/6afd6aa99d90ebe96ec5da9b/reviews` → **200**
 
 ```json
 {
@@ -801,15 +801,15 @@ _data has 8 items, showing first 2_
     {
       "user": {
         "name": "Ritesh",
-        "id": "6af808b84584c783f4070c1b"
+        "id": "6afd6aaa9d90ebe96ec5daed"
       },
-      "product": "6af808b84584c783f4070bc9",
-      "order": "6af808b94584c783f4070c70",
+      "product": "6afd6aa99d90ebe96ec5da9b",
+      "order": "6afd6aaa9d90ebe96ec5db42",
       "rating": 5,
       "comment": "Great quality atta.",
-      "createdAt": "2026-11-14T07:07:37.082Z",
-      "updatedAt": "2026-11-14T07:07:37.082Z",
-      "id": "6af808b94584c783f4070c88"
+      "createdAt": "2026-11-18T09:06:50.454Z",
+      "updatedAt": "2026-11-18T09:06:50.454Z",
+      "id": "6afd6aaa9d90ebe96ec5db5a"
     }
   ],
   "error": null,
@@ -830,7 +830,7 @@ _data has 8 items, showing first 2_
 {
   "success": true,
   "data": {
-    "user": "6af808b84584c783f4070c1b",
+    "user": "6afd6aaa9d90ebe96ec5daed",
     "products": [
       {
         "title": {
@@ -842,7 +842,7 @@ _data has 8 items, showing first 2_
           "en": "Mineral Water — 1 L, sourced fresh for Aali Market customers.",
           "hi": "मिनरल वाटर — 1 L, आली मार्केट के ग्राहकों के लिए ताज़ा उपलब्ध।"
         },
-        "category": "6af808b84584c783f4070bac",
+        "category": "6afd6aa99d90ebe96ec5da7d",
         "brand": "Bisleri",
         "images": [],
         "mrp": 2000,
@@ -856,16 +856,16 @@ _data has 8 items, showing first 2_
           "beverage"
         ],
         "isActive": true,
-        "createdAt": "2026-11-14T07:07:36.566Z",
-        "updatedAt": "2026-11-14T07:07:36.566Z",
+        "createdAt": "2026-11-18T09:06:49.920Z",
+        "updatedAt": "2026-11-18T09:06:49.920Z",
         "discountPercent": 10,
         "inStock": true,
-        "id": "6af808b84584c783f4070bed"
+        "id": "6afd6aa99d90ebe96ec5dabf"
       }
     ],
-    "createdAt": "2026-11-14T07:07:37.096Z",
-    "updatedAt": "2026-11-14T07:07:37.097Z",
-    "id": "6af808b94584c783f4070c92"
+    "createdAt": "2026-11-18T09:06:50.480Z",
+    "updatedAt": "2026-11-18T09:06:50.481Z",
+    "id": "6afd6aaa9d90ebe96ec5db64"
   },
   "error": null
 }
@@ -885,15 +885,15 @@ _data has 8 items, showing first 2_
       "value": 5000,
       "minOrderValue": 19900,
       "maxDiscount": null,
-      "startsAt": "2026-11-14T07:07:36.582Z",
-      "expiresAt": "2027-11-13T18:30:00.000Z",
+      "startsAt": "2026-11-18T09:06:49.935Z",
+      "expiresAt": "2027-11-17T18:30:00.000Z",
       "usageLimit": 10000,
       "perUserLimit": 1,
       "usedCount": 1,
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.583Z",
-      "updatedAt": "2026-11-14T07:07:37.043Z",
-      "id": "6af808b84584c783f4070c05"
+      "createdAt": "2026-11-18T09:06:49.936Z",
+      "updatedAt": "2026-11-18T09:06:50.413Z",
+      "id": "6afd6aa99d90ebe96ec5dad7"
     }
   ],
   "error": null
@@ -923,11 +923,11 @@ _data has 8 items, showing first 2_
 {
   "success": true,
   "data": {
-    "orderNumber": "AALI261114EB0E11CF",
-    "user": "6af808b84584c783f4070c1b",
+    "orderNumber": "AALI26111865C98725",
+    "user": "6afd6aaa9d90ebe96ec5daed",
     "items": [
       {
-        "product": "6af808b84584c783f4070bc9",
+        "product": "6afd6aa99d90ebe96ec5da9b",
         "title": {
           "en": "Aata (Whole Wheat Flour)",
           "hi": "आटा (गेहूं का आटा)"
@@ -955,9 +955,9 @@ _data has 8 items, showing first 2_
       "state": "Uttar Pradesh",
       "pincode": "261001",
       "isDefault": true,
-      "createdAt": "2026-11-14T07:07:36.973Z",
-      "updatedAt": "2026-11-14T07:07:36.973Z",
-      "id": "6af808b84584c783f4070c41"
+      "createdAt": "2026-11-18T09:06:50.348Z",
+      "updatedAt": "2026-11-18T09:06:50.348Z",
+      "id": "6afd6aaa9d90ebe96ec5db13"
     },
     "paymentMethod": "upi",
     "paymentStatus": "pending",
@@ -965,22 +965,22 @@ _data has 8 items, showing first 2_
     "statusHistory": [
       {
         "status": "placed",
-        "at": "2026-11-14T07:07:37.133Z",
+        "at": "2026-11-18T09:06:50.515Z",
         "note": ""
       }
     ],
-    "expectedDeliveryAt": "2026-11-15T07:07:37.133Z",
+    "expectedDeliveryAt": "2026-11-19T09:06:50.515Z",
     "idempotencyKey": "sample-key-upi",
-    "paymentProviderOrderId": "order_mock_5d177aceaa72b769",
+    "paymentProviderOrderId": "order_mock_6d7f21aafa12992a",
     "paymentId": null,
     "cancelReason": null,
-    "createdAt": "2026-11-14T07:07:37.134Z",
-    "updatedAt": "2026-11-14T07:07:37.137Z",
-    "id": "6af808b94584c783f4070caf",
+    "createdAt": "2026-11-18T09:06:50.517Z",
+    "updatedAt": "2026-11-18T09:06:50.520Z",
+    "id": "6afd6aaa9d90ebe96ec5db81",
     "payment": {
       "provider": "mock",
       "keyId": null,
-      "providerOrderId": "order_mock_5d177aceaa72b769",
+      "providerOrderId": "order_mock_6d7f21aafa12992a",
       "amount": 25400,
       "currency": "INR"
     }
@@ -997,15 +997,15 @@ _data has 8 items, showing first 2_
 {
   "success": true,
   "data": {
-    "orderNumber": "AALI261114EB0E11CF",
-    "user": "6af808b84584c783f4070c1b",
+    "orderNumber": "AALI26111865C98725",
+    "user": "6afd6aaa9d90ebe96ec5daed",
     "items": [
       {
         "title": {
           "en": "Aata (Whole Wheat Flour)",
           "hi": "आटा (गेहूं का आटा)"
         },
-        "product": "6af808b84584c783f4070bc9",
+        "product": "6afd6aa99d90ebe96ec5da9b",
         "image": "",
         "unit": "5 kg",
         "price": 24900,
@@ -1029,9 +1029,9 @@ _data has 8 items, showing first 2_
       "state": "Uttar Pradesh",
       "pincode": "261001",
       "isDefault": true,
-      "createdAt": "2026-11-14T07:07:36.973Z",
-      "updatedAt": "2026-11-14T07:07:36.973Z",
-      "id": "6af808b84584c783f4070c41"
+      "createdAt": "2026-11-18T09:06:50.348Z",
+      "updatedAt": "2026-11-18T09:06:50.348Z",
+      "id": "6afd6aaa9d90ebe96ec5db13"
     },
     "paymentMethod": "upi",
     "paymentStatus": "paid",
@@ -1039,27 +1039,27 @@ _data has 8 items, showing first 2_
     "statusHistory": [
       {
         "status": "placed",
-        "at": "2026-11-14T07:07:37.133Z",
+        "at": "2026-11-18T09:06:50.515Z",
         "note": ""
       },
       {
         "status": "confirmed",
-        "at": "2026-11-14T07:07:37.146Z",
+        "at": "2026-11-18T09:06:50.532Z",
         "note": "Payment verified"
       }
     ],
-    "expectedDeliveryAt": "2026-11-15T07:07:37.133Z",
+    "expectedDeliveryAt": "2026-11-19T09:06:50.515Z",
     "idempotencyKey": "sample-key-upi",
-    "paymentProviderOrderId": "order_mock_5d177aceaa72b769",
+    "paymentProviderOrderId": "order_mock_6d7f21aafa12992a",
     "paymentId": "pay_SAMPLE123",
     "cancelReason": null,
-    "createdAt": "2026-11-14T07:07:37.134Z",
-    "updatedAt": "2026-11-14T07:07:37.146Z",
-    "id": "6af808b94584c783f4070caf",
+    "createdAt": "2026-11-18T09:06:50.517Z",
+    "updatedAt": "2026-11-18T09:06:50.532Z",
+    "id": "6afd6aaa9d90ebe96ec5db81",
     "payment": {
       "provider": "mock",
       "keyId": null,
-      "providerOrderId": "order_mock_5d177aceaa72b769",
+      "providerOrderId": "order_mock_6d7f21aafa12992a",
       "amount": 25400,
       "currency": "INR"
     }
@@ -1096,13 +1096,13 @@ _data has 8 items, showing first 2_
   "success": true,
   "data": [
     {
-      "id": "6af808b84584c783f4070c1b",
+      "id": "6afd6aaa9d90ebe96ec5daed",
       "name": "Ritesh",
       "mobile": "9876543210",
       "email": null,
       "isVerified": true,
       "ordersCount": 2,
-      "createdAt": "2026-11-14T07:07:36.871Z"
+      "createdAt": "2026-11-18T09:06:50.226Z"
     }
   ],
   "error": null,
@@ -1117,18 +1117,18 @@ _data has 8 items, showing first 2_
 
 ## GET /admin/orders?status=confirmed&from=...&q=9876 (filters)
 
-`GET /api/v1/admin/orders?status=confirmed&from=2026-11-14&q=9876` → **200**
+`GET /api/v1/admin/orders?status=confirmed&from=2026-11-18&q=9876` → **200**
 
 ```json
 {
   "success": true,
   "data": [
     {
-      "orderNumber": "AALI261114EB0E11CF",
+      "orderNumber": "AALI26111865C98725",
       "user": {
         "mobile": "9876543210",
         "name": "Ritesh",
-        "id": "6af808b84584c783f4070c1b"
+        "id": "6afd6aaa9d90ebe96ec5daed"
       },
       "items": [
         {
@@ -1136,7 +1136,7 @@ _data has 8 items, showing first 2_
             "en": "Aata (Whole Wheat Flour)",
             "hi": "आटा (गेहूं का आटा)"
           },
-          "product": "6af808b84584c783f4070bc9",
+          "product": "6afd6aa99d90ebe96ec5da9b",
           "image": "",
           "unit": "5 kg",
           "price": 24900,
@@ -1160,9 +1160,9 @@ _data has 8 items, showing first 2_
         "state": "Uttar Pradesh",
         "pincode": "261001",
         "isDefault": true,
-        "createdAt": "2026-11-14T07:07:36.973Z",
-        "updatedAt": "2026-11-14T07:07:36.973Z",
-        "id": "6af808b84584c783f4070c41"
+        "createdAt": "2026-11-18T09:06:50.348Z",
+        "updatedAt": "2026-11-18T09:06:50.348Z",
+        "id": "6afd6aaa9d90ebe96ec5db13"
       },
       "paymentMethod": "upi",
       "paymentStatus": "paid",
@@ -1170,23 +1170,23 @@ _data has 8 items, showing first 2_
       "statusHistory": [
         {
           "status": "placed",
-          "at": "2026-11-14T07:07:37.133Z",
+          "at": "2026-11-18T09:06:50.515Z",
           "note": ""
         },
         {
           "status": "confirmed",
-          "at": "2026-11-14T07:07:37.146Z",
+          "at": "2026-11-18T09:06:50.532Z",
           "note": "Payment verified"
         }
       ],
-      "expectedDeliveryAt": "2026-11-15T07:07:37.133Z",
+      "expectedDeliveryAt": "2026-11-19T09:06:50.515Z",
       "idempotencyKey": "sample-key-upi",
-      "paymentProviderOrderId": "order_mock_5d177aceaa72b769",
+      "paymentProviderOrderId": "order_mock_6d7f21aafa12992a",
       "paymentId": "pay_SAMPLE123",
       "cancelReason": null,
-      "createdAt": "2026-11-14T07:07:37.134Z",
-      "updatedAt": "2026-11-14T07:07:37.146Z",
-      "id": "6af808b94584c783f4070caf"
+      "createdAt": "2026-11-18T09:06:50.517Z",
+      "updatedAt": "2026-11-18T09:06:50.532Z",
+      "id": "6afd6aaa9d90ebe96ec5db81"
     }
   ],
   "error": null,
@@ -1201,19 +1201,19 @@ _data has 8 items, showing first 2_
 
 ## GET /admin/orders/:id (full order + customer)
 
-`GET /api/v1/admin/orders/6af808b94584c783f4070c70` → **200**
+`GET /api/v1/admin/orders/6afd6aaa9d90ebe96ec5db42` → **200**
 
 ```json
 {
   "success": true,
   "data": {
-    "orderNumber": "AALI261114939B19A5",
+    "orderNumber": "AALI261118778CDA4B",
     "user": {
       "mobile": "9876543210",
       "name": "Ritesh",
       "isVerified": true,
-      "createdAt": "2026-11-14T07:07:36.871Z",
-      "id": "6af808b84584c783f4070c1b"
+      "createdAt": "2026-11-18T09:06:50.226Z",
+      "id": "6afd6aaa9d90ebe96ec5daed"
     },
     "items": [
       {
@@ -1221,7 +1221,7 @@ _data has 8 items, showing first 2_
           "en": "Aata (Whole Wheat Flour)",
           "hi": "आटा (गेहूं का आटा)"
         },
-        "product": "6af808b84584c783f4070bc9",
+        "product": "6afd6aa99d90ebe96ec5da9b",
         "image": "",
         "unit": "5 kg",
         "price": 24900,
@@ -1245,9 +1245,9 @@ _data has 8 items, showing first 2_
       "state": "Uttar Pradesh",
       "pincode": "261001",
       "isDefault": true,
-      "createdAt": "2026-11-14T07:07:36.973Z",
-      "updatedAt": "2026-11-14T07:07:36.973Z",
-      "id": "6af808b84584c783f4070c41"
+      "createdAt": "2026-11-18T09:06:50.348Z",
+      "updatedAt": "2026-11-18T09:06:50.348Z",
+      "id": "6afd6aaa9d90ebe96ec5db13"
     },
     "paymentMethod": "cod",
     "paymentStatus": "pending",
@@ -1255,28 +1255,28 @@ _data has 8 items, showing first 2_
     "statusHistory": [
       {
         "status": "placed",
-        "at": "2026-11-14T07:07:37.039Z",
+        "at": "2026-11-18T09:06:50.410Z",
         "note": ""
       },
       {
         "status": "confirmed",
-        "at": "2026-11-14T07:07:37.052Z",
+        "at": "2026-11-18T09:06:50.425Z",
         "note": "Packing started"
       },
       {
         "status": "delivered",
-        "at": "2026-11-14T07:07:37.072Z",
+        "at": "2026-11-18T09:06:50.445Z",
         "note": "Delivered"
       }
     ],
-    "expectedDeliveryAt": "2026-11-15T07:07:37.039Z",
+    "expectedDeliveryAt": "2026-11-19T09:06:50.410Z",
     "idempotencyKey": "sample-key-1",
     "paymentProviderOrderId": null,
     "paymentId": null,
     "cancelReason": null,
-    "createdAt": "2026-11-14T07:07:37.041Z",
-    "updatedAt": "2026-11-14T07:07:37.073Z",
-    "id": "6af808b94584c783f4070c70"
+    "createdAt": "2026-11-18T09:06:50.412Z",
+    "updatedAt": "2026-11-18T09:06:50.446Z",
+    "id": "6afd6aaa9d90ebe96ec5db42"
   },
   "error": null
 }
@@ -1306,7 +1306,7 @@ _data has 8 items, showing first 2_
           "hi": "फल और सब्जियां"
         },
         "slug": "fruits-vegetables",
-        "id": "6af808b84584c783f4070b89"
+        "id": "6afd6aa99d90ebe96ec5da5b"
       },
       "brand": "Farm Fresh",
       "images": [],
@@ -1321,11 +1321,11 @@ _data has 8 items, showing first 2_
         "vegetable"
       ],
       "isActive": false,
-      "createdAt": "2026-11-14T07:07:36.525Z",
-      "updatedAt": "2026-11-14T07:07:37.183Z",
+      "createdAt": "2026-11-18T09:06:49.873Z",
+      "updatedAt": "2026-11-18T09:06:50.570Z",
       "discountPercent": 20,
       "inStock": true,
-      "id": "6af808b84584c783f4070bb5"
+      "id": "6afd6aa99d90ebe96ec5da87"
     }
   ],
   "error": null,
@@ -1376,9 +1376,9 @@ _data has 8 items, showing first 2_
       "image": "",
       "sortOrder": 1,
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.475Z",
-      "updatedAt": "2026-11-14T07:07:36.475Z",
-      "id": "6af808b84584c783f4070b89"
+      "createdAt": "2026-11-18T09:06:49.821Z",
+      "updatedAt": "2026-11-18T09:06:49.821Z",
+      "id": "6afd6aa99d90ebe96ec5da5b"
     },
     {
       "name": {
@@ -1390,9 +1390,9 @@ _data has 8 items, showing first 2_
       "image": "",
       "sortOrder": 2,
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.498Z",
-      "updatedAt": "2026-11-14T07:07:36.498Z",
-      "id": "6af808b84584c783f4070b99"
+      "createdAt": "2026-11-18T09:06:49.842Z",
+      "updatedAt": "2026-11-18T09:06:49.842Z",
+      "id": "6afd6aa99d90ebe96ec5da6a"
     }
   ],
   "error": null
@@ -1416,9 +1416,9 @@ _data has 8 items, showing first 2_
       "link": "/category/grocery-staples",
       "sortOrder": 1,
       "isActive": true,
-      "createdAt": "2026-11-14T07:07:36.892Z",
-      "updatedAt": "2026-11-14T07:07:36.892Z",
-      "id": "6af808b84584c783f4070c22"
+      "createdAt": "2026-11-18T09:06:50.248Z",
+      "updatedAt": "2026-11-18T09:06:50.248Z",
+      "id": "6afd6aaa9d90ebe96ec5daf4"
     }
   ],
   "error": null
@@ -1442,7 +1442,7 @@ _data has 8 items, showing first 2_
       "open": "08:00",
       "close": "22:00"
     },
-    "updatedAt": "2026-11-14T07:07:36.932Z"
+    "updatedAt": "2026-11-18T09:06:50.304Z"
   },
   "error": null
 }
@@ -1465,7 +1465,7 @@ _data has 8 items, showing first 2_
       "open": "08:00",
       "close": "22:00"
     },
-    "updatedAt": "2026-11-14T07:07:37.218Z"
+    "updatedAt": "2026-11-18T09:06:50.605Z"
   },
   "error": null
 }
@@ -1490,9 +1490,9 @@ _data has 3 items, showing first 2_
       "isActive": true,
       "deliveryFee": 3500,
       "etaDays": 2,
-      "createdAt": "2026-11-14T07:07:36.587Z",
-      "updatedAt": "2026-11-14T07:07:36.587Z",
-      "id": "6af808b84584c783f4070c0b"
+      "createdAt": "2026-11-18T09:06:49.939Z",
+      "updatedAt": "2026-11-18T09:06:49.939Z",
+      "id": "6afd6aa99d90ebe96ec5dadd"
     },
     {
       "pincode": "226001",
@@ -1503,9 +1503,9 @@ _data has 3 items, showing first 2_
       "isActive": true,
       "deliveryFee": null,
       "etaDays": 2,
-      "createdAt": "2026-11-14T07:07:36.587Z",
-      "updatedAt": "2026-11-14T07:07:36.587Z",
-      "id": "6af808b84584c783f4070c0a"
+      "createdAt": "2026-11-18T09:06:49.939Z",
+      "updatedAt": "2026-11-18T09:06:49.939Z",
+      "id": "6afd6aa99d90ebe96ec5dadc"
     }
   ],
   "error": null,
@@ -1534,9 +1534,9 @@ _data has 3 items, showing first 2_
     "isActive": true,
     "deliveryFee": null,
     "etaDays": 2,
-    "createdAt": "2026-11-14T07:07:37.231Z",
-    "updatedAt": "2026-11-14T07:07:37.231Z",
-    "id": "6af808b94584c783f4070ce3"
+    "createdAt": "2026-11-18T09:06:50.615Z",
+    "updatedAt": "2026-11-18T09:06:50.615Z",
+    "id": "6afd6aaa9d90ebe96ec5dbb5"
   },
   "error": null
 }
@@ -1552,7 +1552,7 @@ _data has 3 items, showing first 2_
   "data": {
     "items": [
       {
-        "productId": "6af808b84584c783f4070bed",
+        "productId": "6afd6aa99d90ebe96ec5dabf",
         "title": {
           "en": "Mineral Water",
           "hi": "मिनरल वाटर"

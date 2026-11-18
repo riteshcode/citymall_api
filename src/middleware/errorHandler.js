@@ -2,6 +2,7 @@ import { logger } from '../config/logger.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
 import { env } from '../config/env.js';
+import { MAX_IMAGE_BYTES, MAX_IMAGES } from './upload.js';
 
 export function notFoundHandler(req, res, next) {
   next(ApiError.notFound(ErrorCodes.NOT_FOUND, `Route not found: ${req.method} ${req.originalUrl}`));
@@ -54,6 +55,20 @@ function normalizeError(err) {
 
   if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
     return ApiError.unauthorized(ErrorCodes.TOKEN_INVALID, 'Invalid or expired token');
+  }
+
+  // multer (upload.js) — without this branch an oversized file would surface as a 500
+  if (err.name === 'MulterError') {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return new ApiError(413, ErrorCodes.FILE_TOO_LARGE, `Each image must be ${MAX_IMAGE_BYTES / 1024 / 1024} MB or smaller`);
+    }
+    if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+      return ApiError.badRequest(
+        ErrorCodes.VALIDATION_ERROR,
+        `Send up to ${MAX_IMAGES} images in the multipart field "images"`
+      );
+    }
+    return ApiError.badRequest(ErrorCodes.VALIDATION_ERROR, err.message);
   }
 
   if (err.type === 'entity.too.large') {
