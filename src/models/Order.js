@@ -60,6 +60,8 @@ const orderSchema = new mongoose.Schema(
     expectedDeliveryAt: { type: Date, default: null },
     idempotencyKey: { type: String, required: true, unique: true },
     paymentProviderOrderId: { type: String, default: null },
+    // Gateway payment id (e.g. Razorpay pay_xxx), set when payment is verified / captured.
+    paymentId: { type: String, default: null },
     cancelReason: { type: String, default: null },
   },
   { timestamps: true }

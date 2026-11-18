@@ -9,9 +9,12 @@ import { buildPricing, computeSubtotal } from './pricing.service.js';
 import { getEligibleCoupon, recordCouponRedemption } from './coupon.service.js';
 import { generateOrderNumber } from '../utils/generators.js';
 import { paginateQuery } from '../utils/mongoosePlugins.js';
+import { containsRegex } from '../utils/regex.js';
+import { parseDateBoundary } from '../utils/dates.js';
+import { getSettings } from './settings.service.js';
+import { resolveDelivery } from './serviceability.service.js';
 
 const CANCELLABLE_STATUSES = ['placed', 'confirmed', 'packed'];
-const DELIVERY_ETA_DAYS = 2;
 
 /**
  * Places an order for the user's current cart. Idempotent on
@@ -24,6 +27,14 @@ export async function createOrder(userId, { addressId, paymentMethod, idempotenc
   const existing = await Order.findOne({ idempotencyKey, user: userId });
   if (existing) return existing;
 
+  // Read the admin-configurable store rules once, outside the transaction.
+  const settings = await getSettings();
+  if (!settings.storeOpen) {
+    throw new ApiError(503, ErrorCodes.STORE_CLOSED, 'The store is currently closed and not accepting orders', {
+      storeTimings: { open: settings.storeTimings.open, close: settings.storeTimings.close },
+    });
+  }
+
   const session = await mongoose.startSession();
   try {
     let order;
@@ -33,6 +44,13 @@ export async function createOrder(userId, { addressId, paymentMethod, idempotenc
       const address = user.addresses.find((a) => a._id.toString() === addressId);
       if (!address) {
         throw ApiError.notFound(ErrorCodes.ADDRESS_NOT_FOUND, 'Shipping address not found');
+      }
+
+      const delivery = await resolveDelivery(address.pincode);
+      if (!delivery.serviceable) {
+        throw ApiError.badRequest(ErrorCodes.NOT_SERVICEABLE, 'We do not deliver to this pincode yet', {
+          pincode: address.pincode,
+        });
       }
 
       const cart = await Cart.findOne({ user: userId }).session(session);
@@ -70,13 +88,26 @@ export async function createOrder(userId, { addressId, paymentMethod, idempotenc
         lineItems.push({ price: product.price, qty: item.qty });
       }
 
+      const subtotal = computeSubtotal(lineItems);
+      if (settings.minOrderValue > 0 && subtotal < settings.minOrderValue) {
+        throw ApiError.badRequest(
+          ErrorCodes.MIN_ORDER_VALUE,
+          'Your order is below the minimum order value',
+          { minOrderValue: settings.minOrderValue, subtotal }
+        );
+      }
+
       let coupon = null;
       if (cart.couponCode) {
-        const subtotal = computeSubtotal(lineItems);
         coupon = await getEligibleCoupon(cart.couponCode, { subtotal, userId, session });
       }
 
-      const pricing = buildPricing({ lineItems, coupon });
+      const pricing = buildPricing({
+        lineItems,
+        coupon,
+        settings,
+        deliveryFeeOverride: delivery.deliveryFeeOverride,
+      });
 
       // Atomic, condition-checked stock decrement — guards against oversell under concurrent orders.
       for (const item of cart.items) {
@@ -108,7 +139,7 @@ export async function createOrder(userId, { addressId, paymentMethod, idempotenc
             paymentStatus: 'pending',
             status: 'placed',
             statusHistory: [{ status: 'placed', at: new Date() }],
-            expectedDeliveryAt: new Date(Date.now() + DELIVERY_ETA_DAYS * 24 * 60 * 60 * 1000),
+            expectedDeliveryAt: new Date(Date.now() + delivery.etaDays * 24 * 60 * 60 * 1000),
             idempotencyKey,
           },
         ],
@@ -141,9 +172,42 @@ export async function listOrders(userId, { page, limit }) {
   return paginateQuery(Order, { user: userId }, { page, limit, sort: { createdAt: -1 } });
 }
 
+/**
+ * Admin: every user's orders, newest first.
+ * Filters: status; from/to on createdAt (date-only values cover the whole IST day);
+ * q = orderNumber substring OR customer mobile substring.
+ */
+export async function listAllOrders({ page, limit, status, from, to, q }) {
+  const filter = {};
+  if (status) filter.status = status;
+
+  if (from || to) {
+    filter.createdAt = {};
+    if (from) filter.createdAt.$gte = parseDateBoundary(from, 'start');
+    if (to) filter.createdAt.$lte = parseDateBoundary(to, 'end');
+  }
+
+  if (q) {
+    const rx = containsRegex(q);
+    // Capped: a 1-2 digit q can match a lot of mobiles; the orderNumber branch still applies in full.
+    const userIds = await User.find({ mobile: rx }).select('_id').limit(1000).lean();
+    filter.$or = [{ orderNumber: rx }, { user: { $in: userIds.map((u) => u._id) } }];
+  }
+
+  return paginateQuery(Order, filter, {
+    page,
+    limit,
+    sort: { createdAt: -1 },
+    populate: { path: 'user', select: 'name mobile' },
+  });
+}
+
 export async function getOrderById(userId, orderId, { isAdmin = false } = {}) {
   const filter = isAdmin ? { _id: orderId } : { _id: orderId, user: userId };
-  const order = await Order.findOne(filter);
+  const query = Order.findOne(filter);
+  // Admin gets the full customer card alongside the order.
+  if (isAdmin) query.populate({ path: 'user', select: 'name mobile email isVerified createdAt' });
+  const order = await query;
   if (!order) {
     throw ApiError.notFound(ErrorCodes.ORDER_NOT_FOUND, 'Order not found');
   }

@@ -4,6 +4,8 @@ import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
 import { buildPricing, computeSubtotal } from './pricing.service.js';
 import { getEligibleCoupon } from './coupon.service.js';
+import { getSettings } from './settings.service.js';
+import { resolveDelivery } from './serviceability.service.js';
 
 async function getOrCreateCart(userId) {
   let cart = await Cart.findOne({ user: userId });
@@ -15,8 +17,11 @@ async function getOrCreateCart(userId) {
  * Resolves a cart's items against LIVE product data and returns the full
  * shape the client renders directly (no local math needed). Server prices
  * are always re-read here — priceAtAdd on the cart item is never trusted.
+ *
+ * @param {{ pincode?: string }} [options] when given and serviceable, that pincode's delivery-fee
+ *   override is previewed so the cart total matches what checkout will charge.
  */
-async function buildCartView(cart) {
+async function buildCartView(cart, { pincode } = {}) {
   const productIds = cart.items.map((i) => i.product);
   const products = await Product.find({ _id: { $in: productIds } });
   const productMap = new Map(products.map((p) => [p.id, p]));
@@ -60,7 +65,14 @@ async function buildCartView(cart) {
     }
   }
 
-  const pricing = buildPricing({ lineItems, coupon });
+  const settings = await getSettings();
+  const delivery = pincode ? await resolveDelivery(pincode) : null;
+  const pricing = buildPricing({
+    lineItems,
+    coupon,
+    settings,
+    deliveryFeeOverride: delivery?.serviceable ? delivery.deliveryFeeOverride : null,
+  });
 
   return {
     items: responseItems,
@@ -70,9 +82,9 @@ async function buildCartView(cart) {
   };
 }
 
-export async function getCart(userId) {
+export async function getCart(userId, options) {
   const cart = await getOrCreateCart(userId);
-  return buildCartView(cart);
+  return buildCartView(cart, options);
 }
 
 export async function addItem(userId, productId, qty) {

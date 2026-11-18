@@ -6,8 +6,8 @@ import * as authService from '../services/auth.service.js';
 
 export const sendOtp = catchAsync(async (req, res) => {
   const { mobile, purpose } = req.body;
-  const { expiresAt, ttlMinutes } = await otpService.sendOtp(mobile, purpose);
-  sendSuccess(res, { data: { mobile, expiresAt, ttlMinutes } });
+  const { expiresAt, ttlMinutes, code } = await otpService.sendOtp(mobile, purpose);
+  sendSuccess(res, { data: { mobile, expiresAt, ttlMinutes, code } });
 });
 
 export const verifyOtp = catchAsync(async (req, res) => {

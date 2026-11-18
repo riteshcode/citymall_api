@@ -3,7 +3,7 @@ import { sendSuccess } from '../utils/ApiResponse.js';
 import * as cartService from '../services/cart.service.js';
 
 export const getCart = catchAsync(async (req, res) => {
-  const cart = await cartService.getCart(req.user.id);
+  const cart = await cartService.getCart(req.user.id, { pincode: req.query.pincode });
   sendSuccess(res, { data: cart });
 });
 

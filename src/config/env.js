@@ -41,6 +41,10 @@ export const env = {
     origin: process.env.CORS_ORIGIN || '*',
   },
 
+  // Number of reverse-proxy hops in front of the app (nginx / ALB / Render = 1). Needed so rate limiting
+  // sees each client's real IP instead of the proxy's. Leave 0 when the app is hit directly.
+  trustProxy: toInt(process.env.TRUST_PROXY, 0),
+
   rateLimit: {
     windowMinutes: toInt(process.env.RATE_LIMIT_WINDOW_MINUTES, 15),
     max: toInt(process.env.RATE_LIMIT_MAX, 300),
@@ -68,6 +72,12 @@ export const env = {
     freeDeliveryThresholdPaise: toInt(process.env.FREE_DELIVERY_THRESHOLD_PAISE, 19900),
     handlingFeePaise: toInt(process.env.DEFAULT_HANDLING_FEE_PAISE, 500),
   },
+
+  // "Today" in dashboard stats / date filters. 330 = IST (UTC+5:30, no DST).
+  storeUtcOffsetMinutes: toInt(process.env.STORE_UTC_OFFSET_MINUTES, 330),
+
+  // A product counts as "low stock" at or below this many units (admin product filter + dashboard stats).
+  lowStockThreshold: toInt(process.env.LOW_STOCK_THRESHOLD, 10),
 
   seed: {
     adminMobile: process.env.SEED_ADMIN_MOBILE || '9999999999',

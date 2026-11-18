@@ -11,6 +11,10 @@ export const listProducts = catchAsync(async (req, res) => {
   sendSuccess(res, { data: docs, meta: { total, page, limit, pages } });
 });
 
+export const suggestProducts = catchAsync(async (req, res) => {
+  sendSuccess(res, { data: await productService.suggestProducts(req.query.q) });
+});
+
 export const getProductBySlug = catchAsync(async (req, res) => {
   const product = await productService.getProductBySlug(req.params.slug);
   sendSuccess(res, { data: product });

@@ -10,3 +10,5 @@ export { Review } from './Review.js';
 export { Wishlist } from './Wishlist.js';
 export { Banner } from './Banner.js';
 export { RefreshToken } from './RefreshToken.js';
+export { Setting } from './Setting.js';
+export { Pincode } from './Pincode.js';

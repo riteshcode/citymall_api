@@ -10,6 +10,12 @@ export const listBanners = catchAsync(async (req, res) => {
   sendSuccess(res, { data: banners });
 });
 
+/** Admin: every banner, inactive ones included. */
+export const adminListBanners = catchAsync(async (req, res) => {
+  const banners = await Banner.find().sort({ sortOrder: 1, createdAt: 1 });
+  sendSuccess(res, { data: banners });
+});
+
 export const createBanner = catchAsync(async (req, res) => {
   const banner = await Banner.create(req.body);
   sendSuccess(res, { statusCode: 201, data: banner });

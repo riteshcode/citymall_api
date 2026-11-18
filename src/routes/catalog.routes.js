@@ -10,6 +10,7 @@ import {
   productSlugParamSchema,
   productIdParamSchema,
   relatedProductsSchema,
+  suggestProductsSchema,
 } from '../validations/product.validation.js';
 import { createReviewSchema, listReviewsSchema } from '../validations/review.validation.js';
 
@@ -19,6 +20,8 @@ router.get('/categories', categoryController.listCategories);
 router.get('/banners', bannerController.listBanners);
 
 router.get('/products', validate(listProductsSchema), productController.listProducts);
+// Must be registered before '/products/:slug', which would otherwise swallow "suggest" as a slug.
+router.get('/products/suggest', validate(suggestProductsSchema), productController.suggestProducts);
 router.get('/products/:slug', validate(productSlugParamSchema), productController.getProductBySlug);
 router.get('/products/:id/related', validate(relatedProductsSchema), productController.getRelatedProducts);
 

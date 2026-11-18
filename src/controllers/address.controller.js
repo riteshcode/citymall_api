@@ -2,6 +2,8 @@ import { catchAsync } from '../utils/catchAsync.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
+import { resolveDelivery } from '../services/serviceability.service.js';
+import { getSettings } from '../services/settings.service.js';
 
 function findAddress(user, id) {
   const address = user.addresses.find((a) => a._id.toString() === id);
@@ -57,17 +59,20 @@ export const setDefaultAddress = catchAsync(async (req, res) => {
   sendSuccess(res, { data: user.addresses });
 });
 
-// Stubbed serviceability check — swap for a real pincode/hub lookup later.
-const NON_SERVICEABLE_PREFIXES = ['00', '99'];
-
+/** Reads the Pincode collection (see serviceability.service.js for the "nothing configured yet" open mode). */
 export const checkServiceability = catchAsync(async (req, res) => {
   const { pincode } = req.query;
-  const serviceable = !NON_SERVICEABLE_PREFIXES.some((p) => pincode.startsWith(p));
+  const delivery = await resolveDelivery(pincode);
+  const settings = delivery.serviceable ? await getSettings() : null;
+
   sendSuccess(res, {
     data: {
       pincode,
-      serviceable,
-      etaDays: serviceable ? 2 : null,
+      serviceable: delivery.serviceable,
+      etaDays: delivery.etaDays,
+      areaName: delivery.areaName,
+      // Base delivery fee (paise) for this pincode, before the free-delivery threshold is applied.
+      deliveryFee: settings ? delivery.deliveryFeeOverride ?? settings.deliveryFee : null,
     },
   });
 });

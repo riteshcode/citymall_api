@@ -3,6 +3,7 @@ import { validate } from '../middleware/validate.js';
 import { authenticate } from '../middleware/auth.js';
 import * as cartController from '../controllers/cart.controller.js';
 import {
+  getCartSchema,
   addCartItemSchema,
   updateCartItemSchema,
   removeCartItemSchema,
@@ -12,7 +13,7 @@ import {
 const router = Router();
 router.use(authenticate);
 
-router.get('/', cartController.getCart);
+router.get('/', validate(getCartSchema), cartController.getCart);
 router.post('/items', validate(addCartItemSchema), cartController.addItem);
 router.patch('/items/:productId', validate(updateCartItemSchema), cartController.updateItem);
 router.delete('/items/:productId', validate(removeCartItemSchema), cartController.removeItem);

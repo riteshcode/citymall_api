@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { objectIdSchema } from '../utils/zodHelpers.js';
+import { objectIdSchema, pincodeSchema } from '../utils/zodHelpers.js';
+
+// Optional: preview that pincode's delivery-fee override so the cart total matches checkout.
+export const getCartSchema = {
+  query: z.object({ pincode: pincodeSchema.optional() }).strict(),
+};
 
 export const addCartItemSchema = {
   body: z

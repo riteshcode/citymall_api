@@ -67,3 +67,30 @@ describe('pricing.service — cart math (all paise, integers)', () => {
     expect(pricing.discount).toBeLessThanOrEqual(pricing.subtotal);
   });
 });
+
+describe('pricing.service — DB-backed settings and per-pincode fee override', () => {
+  const settings = { deliveryFee: 4000, freeDeliveryThreshold: 10000, handlingFee: 100 };
+
+  it('uses the passed settings instead of env', () => {
+    expect(computeDeliveryFee(9999, settings)).toBe(4000);
+    expect(computeDeliveryFee(10000, settings)).toBe(0);
+    expect(computeHandlingFee(500, settings)).toBe(100);
+  });
+
+  it('a pincode override replaces the base delivery fee but the free threshold still wins', () => {
+    expect(computeDeliveryFee(5000, settings, 1500)).toBe(1500);
+    expect(computeDeliveryFee(5000, settings, 0)).toBe(0); // an explicit ₹0 override is honoured (not treated as "unset")
+    expect(computeDeliveryFee(10000, settings, 1500)).toBe(0);
+    expect(computeDeliveryFee(5000, settings, null)).toBe(4000);
+  });
+
+  it('threshold 0 means delivery is always free; empty cart still costs nothing', () => {
+    expect(computeDeliveryFee(1, { ...settings, freeDeliveryThreshold: 0 })).toBe(0);
+    expect(computeDeliveryFee(0, settings, 1500)).toBe(0);
+  });
+
+  it('buildPricing threads settings + override through to the total', () => {
+    const p = buildPricing({ lineItems: [{ price: 5000, qty: 1 }], settings, deliveryFeeOverride: 1500 });
+    expect(p).toEqual({ subtotal: 5000, discount: 0, deliveryFee: 1500, handlingFee: 100, total: 6600 });
+  });
+});

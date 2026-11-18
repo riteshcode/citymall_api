@@ -58,3 +58,20 @@ export async function createAddress(user, overrides = {}) {
   await user.save();
   return user.addresses.at(-1);
 }
+
+/** Adds `product` to the user's cart and places an order. Returns the supertest response. */
+export async function placeOrder(app, base, who, product, addressId, { key, paymentMethod = 'cod', qty = 1 } = {}) {
+  const { default: request } = await import('supertest');
+  const h = { Authorization: `Bearer ${who.accessToken}` };
+  await request(app).post(`${base}/cart/items`).set(h).send({ productId: product.id, qty });
+  return request(app)
+    .post(`${base}/orders`)
+    .set(h)
+    .set('Idempotency-Key', key || `key-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    .send({ addressId, paymentMethod });
+}
+
+/** Store-local (IST) calendar date `daysAgo` days back, as YYYY-MM-DD — same convention as the API's from/to filters. */
+export function istDate(daysAgo = 0) {
+  return new Date(Date.now() + 330 * 60000 - daysAgo * 86400000).toISOString().slice(0, 10);
+}

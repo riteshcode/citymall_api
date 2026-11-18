@@ -110,6 +110,7 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | GET | `/categories` | List active categories |
 | GET | `/banners` | List active home-carousel banners |
 | GET | `/products` | Filter/sort/search/paginate products (`meta.total` = "N products") |
+| GET | `/products/suggest?q=` | Type-ahead: top 8 prefix matches (`{ id, slug, title, price, image }`) — "att" finds "atta" |
 | GET | `/products/:slug` | Product detail |
 | GET | `/products/:id/related` | Related products (same category) |
 | GET | `/products/:id/reviews` | List reviews for a product |
@@ -119,7 +120,7 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/cart` 🔒 | Get cart with full pricing breakdown |
+| GET | `/cart` 🔒 | Get cart with full pricing breakdown. Optional `?pincode=` previews that area's delivery-fee override so the total matches checkout |
 | POST | `/cart/items` 🔒 | Add item `{ productId, qty }` |
 | PATCH | `/cart/items/:productId` 🔒 | Update qty (`qty: 0` removes it) |
 | DELETE | `/cart/items/:productId` 🔒 | Remove item |
@@ -136,28 +137,44 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | PATCH | `/addresses/:id` 🔒 | Update address |
 | DELETE | `/addresses/:id` 🔒 | Delete address |
 | POST | `/addresses/:id/default` 🔒 | Set as default |
-| GET | `/serviceability?pincode=` | Check pincode serviceability |
+| GET | `/serviceability?pincode=` | Serviceability from the admin-managed pincode list → `{ pincode, serviceable, etaDays, areaName, deliveryFee }` |
+| GET | `/settings` | Public store settings: `deliveryFee`, `freeDeliveryThreshold`, `handlingFee`, `minOrderValue`, `storeOpen`, `storeTimings` (paise) — for "add ₹X more for free delivery" |
 
 ### Checkout & Orders
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/orders` 🔒 | Place order from cart. **Requires `Idempotency-Key` header.** Re-validates stock/price/coupon in a transaction; decrements stock; clears cart |
+| POST | `/orders` 🔒 | Place order from cart (rejected with `STORE_CLOSED` / `MIN_ORDER_VALUE` / `NOT_SERVICEABLE` per store settings; online methods also return a `payment` block `{ provider, keyId, providerOrderId, amount, currency }`). **Requires `Idempotency-Key` header.** Re-validates stock/price/coupon in a transaction; decrements stock; clears cart |
 | GET | `/orders` 🔒 | List current user's orders (paginated) |
 | GET | `/orders/:id` 🔒 | Order detail with `statusHistory` for tracking |
 | POST | `/orders/:id/cancel` 🔒 | Cancel (only while `placed`/`confirmed`/`packed`); restores stock |
-| POST | `/payments/webhook` | Razorpay-shaped payment webhook (raw body, HMAC signature verified) |
+| POST | `/payments/verify` 🔒 | After Razorpay checkout succeeds: `{ orderId, razorpay_payment_id, razorpay_signature }` → signature verified, `paymentStatus = paid` |
+| POST | `/payments/webhook` | Razorpay payment webhook (raw body, HMAC signature verified) |
 
 ### Admin (👑 `role: admin`)
 
 | Method | Path | Description |
 |---|---|---|
-| POST/PATCH/DELETE | `/admin/products`, `/admin/products/:id` | Product CRUD |
+| GET | `/admin/stats` | Dashboard: `todayOrders`, `todayRevenue` (paise), `pendingOrders`, `outForDelivery`, `lowStockCount`, `totalCustomers` ("today" = IST day) |
+| GET | `/admin/orders?page&limit&status&from&to&q` | All orders; `q` = orderNumber or customer mobile; `from`/`to` = `YYYY-MM-DD` (whole IST day, inclusive) or ISO datetime; `user` populated as `{ id, name, mobile }` |
+| GET | `/admin/orders/:id` | One order + full customer card |
+| PATCH | `/admin/orders/:id/status` | Transition order status |
+| GET | `/admin/users?page&limit&q` | Customers with `ordersCount` |
+| GET | `/admin/products?page&limit&q&category&isActive&lowStock` | Products incl. inactive (soft-deleted can be re-activated with `PATCH { isActive: true }`) |
+| POST/PATCH/DELETE | `/admin/products`, `/admin/products/:id` | Product CRUD (DELETE = soft) |
+| GET | `/admin/categories`, `/admin/banners` | All rows incl. inactive |
 | POST/PATCH/DELETE | `/admin/categories`, `/admin/categories/:id` | Category CRUD |
 | GET/POST/PATCH/DELETE | `/admin/coupons`, `/admin/coupons/:id` | Coupon CRUD |
 | POST/PATCH/DELETE | `/admin/banners`, `/admin/banners/:id` | Banner CRUD |
-| PATCH | `/admin/orders/:id/status` | Transition order status |
+| GET/PATCH | `/admin/settings` | Delivery fee, free-delivery threshold, handling fee, min order value, store open/closed, timings |
+| GET/POST/PATCH/DELETE | `/admin/pincodes`, `/admin/pincodes/:id` | Serviceable areas `{ pincode, areaName{en,hi}, isActive, deliveryFee?, etaDays }` (DELETE = hard) |
 | POST | `/admin/uploads` | Upload images (multipart field `images`, max 6, 5 MB each) → S3 URLs |
+
+#### Store settings & serviceable areas — behaviour worth knowing
+
+- **Settings** live in one DB document (created from the `DEFAULT_*` env values on first read). Cart totals and checkout read it on every request, so changes apply immediately. `storeOpen = false` → `POST /orders` returns `503 STORE_CLOSED` (retries of an already-placed order via the same `Idempotency-Key` still succeed). `minOrderValue` is checked against the pre-discount subtotal (`400 MIN_ORDER_VALUE`). `storeTimings` is display-only.
+- **Pincodes**: with **no** pincode documents the API serves every pincode (so a fresh install works); as soon as one exists, only active listed pincodes are serviceable and checkout rejects others with `400 NOT_SERVICEABLE`. A pincode's `deliveryFee` replaces the store delivery fee for that area (the free-delivery threshold still applies); `etaDays` drives `expectedDeliveryAt`. `npm run seed` adds three sample areas — delete or edit them to match your real coverage.
+- **Online payments**: set `PAYMENT_PROVIDER=razorpay` plus `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`. Orders paid online call the real Razorpay Orders API. The `mock` provider only verifies outside production. Flow: `POST /orders` → open Razorpay checkout with `payment.keyId` + `payment.providerOrderId` → `POST /payments/verify` with the three values Razorpay returns (the webhook confirms independently; whichever lands first wins, both are idempotent).
 
 ### Wishlist (bonus — simple, per the data model)
 
@@ -171,7 +188,7 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 
 Every error response is `{ success: false, data: null, error: { code, message, details? } }`. Stable codes (non-exhaustive — see `src/utils/errorCodes.js` for the full list) so the client can render the right bilingual copy:
 
-`OTP_EXPIRED`, `OTP_INVALID`, `OTP_MAX_ATTEMPTS`, `OTP_SEND_RATE_LIMITED`, `TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, `VALIDATION_ERROR`, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `COUPON_NOT_FOUND`, `COUPON_EXPIRED`, `COUPON_MIN_ORDER`, `COUPON_USAGE_LIMIT_REACHED`, `COUPON_PER_USER_LIMIT_REACHED`, `ADDRESS_NOT_FOUND`, `ORDER_NOT_FOUND`, `ORDER_NOT_CANCELLABLE`, `IDEMPOTENCY_KEY_REQUIRED`, `REVIEW_REQUIRES_DELIVERED_ORDER`, `REVIEW_ALREADY_EXISTS`, `PAYMENT_SIGNATURE_INVALID`, `FORBIDDEN`, `RATE_LIMITED`.
+`OTP_EXPIRED`, `OTP_INVALID`, `OTP_MAX_ATTEMPTS`, `OTP_SEND_RATE_LIMITED`, `TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, `VALIDATION_ERROR`, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `COUPON_NOT_FOUND`, `COUPON_EXPIRED`, `COUPON_MIN_ORDER`, `COUPON_USAGE_LIMIT_REACHED`, `COUPON_PER_USER_LIMIT_REACHED`, `ADDRESS_NOT_FOUND`, `ORDER_NOT_FOUND`, `ORDER_NOT_CANCELLABLE`, `IDEMPOTENCY_KEY_REQUIRED`, `REVIEW_REQUIRES_DELIVERED_ORDER`, `REVIEW_ALREADY_EXISTS`, `PAYMENT_SIGNATURE_INVALID`, `FORBIDDEN`, `RATE_LIMITED`, `STORE_CLOSED`, `MIN_ORDER_VALUE`, `NOT_SERVICEABLE`, `PINCODE_NOT_FOUND`, `PAYMENT_NOT_REQUIRED`, `ORDER_NOT_PAYABLE`, `PAYMENT_PROVIDER_ERROR`.
 
 ## API spec
 

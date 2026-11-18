@@ -10,6 +10,12 @@ export const listCategories = catchAsync(async (req, res) => {
   sendSuccess(res, { data: categories });
 });
 
+/** Admin: every category, inactive ones included. */
+export const adminListCategories = catchAsync(async (req, res) => {
+  const categories = await Category.find().sort({ sortOrder: 1, createdAt: 1 });
+  sendSuccess(res, { data: categories });
+});
+
 export const createCategory = catchAsync(async (req, res) => {
   const category = await Category.create(req.body);
   sendSuccess(res, { statusCode: 201, data: category });

@@ -13,7 +13,7 @@ export async function sendOtp(mobile, purpose) {
   await Otp.create({ mobile, codeHash, purpose, expiresAt });
   await getSmsProvider().sendOtp(mobile, code);
 
-  return { expiresAt, ttlMinutes: env.otp.ttlMinutes };
+  return { expiresAt, ttlMinutes: env.otp.ttlMinutes, code };
 }
 
 export async function verifyOtp(mobile, code, purpose) {

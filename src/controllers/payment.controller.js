@@ -2,15 +2,25 @@ import { catchAsync } from '../utils/catchAsync.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
-import { getPaymentProvider } from '../services/payment.service.js';
+import {
+  getPaymentProvider,
+  markOrderPaid,
+  markPaymentFailed,
+  verifyOrderPayment,
+  buildPaymentInfo,
+} from '../services/payment.service.js';
 import { Order } from '../models/Order.js';
 
+function extractPayment(payload) {
+  return payload?.payload?.payment?.entity;
+}
+
 function extractProviderOrderId(payload) {
-  return payload?.payload?.payment?.entity?.order_id || payload?.orderId;
+  return extractPayment(payload)?.order_id || payload?.orderId;
 }
 
 function extractStatus(payload) {
-  const raw = payload?.payload?.payment?.entity?.status || payload?.status;
+  const raw = extractPayment(payload)?.status || payload?.status;
   if (raw === 'captured' || raw === 'paid') return 'paid';
   if (raw === 'failed') return 'failed';
   return raw;
@@ -40,12 +50,23 @@ export const handleWebhook = catchAsync(async (req, res) => {
     return sendSuccess(res, { data: { received: true, matched: false } });
   }
 
-  order.paymentStatus = status === 'paid' ? 'paid' : 'failed';
-  if (status === 'paid' && order.status === 'placed') {
-    order.status = 'confirmed';
-    order.statusHistory.push({ status: 'confirmed', at: new Date(), note: 'Payment confirmed via webhook' });
+  if (status === 'paid') {
+    await markOrderPaid(order._id, extractPayment(payload)?.id, 'Payment confirmed via webhook');
+  } else if (status === 'failed') {
+    await markPaymentFailed(order._id);
   }
-  await order.save();
 
   sendSuccess(res, { data: { received: true, matched: true } });
+});
+
+/** Customer confirms a completed checkout: POST /payments/verify */
+export const verifyPayment = catchAsync(async (req, res) => {
+  const { orderId, razorpay_payment_id, razorpay_signature, razorpay_order_id } = req.body;
+  const order = await verifyOrderPayment(req.user.id, {
+    orderId,
+    paymentId: razorpay_payment_id,
+    signature: razorpay_signature,
+    providerOrderId: razorpay_order_id,
+  });
+  sendSuccess(res, { data: { ...order.toJSON(), payment: buildPaymentInfo(order) } });
 });

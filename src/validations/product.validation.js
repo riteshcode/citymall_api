@@ -9,13 +9,18 @@ export const listProductsSchema = {
       maxPrice: z.coerce.number().int().min(0).optional(),
       brand: z.string().trim().min(1).max(80).optional(),
       rating: z.coerce.number().min(0).max(5).optional(),
-      inStock: z.coerce.boolean().optional(),
+      // NOT z.coerce.boolean(): Boolean("false") === true, so ?inStock=false would turn the filter ON.
+      inStock: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
       sort: z.enum(['popular', 'price_asc', 'price_desc', 'newest', 'discount']).default('newest'),
       q: z.string().trim().min(1).max(120).optional(),
       page: z.coerce.number().int().min(1).default(1),
       limit: z.coerce.number().int().min(1).max(100).default(20),
     })
     .strict(),
+};
+
+export const suggestProductsSchema = {
+  query: z.object({ q: z.string().trim().min(1).max(60) }).strict(),
 };
 
 export const productSlugParamSchema = {

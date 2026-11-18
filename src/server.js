@@ -4,6 +4,9 @@ import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 
 async function main() {
+  if (env.isProd && env.payments.provider === 'mock') {
+    logger.warn('PAYMENT_PROVIDER=mock in production: online payments cannot be verified and will always fail. Set PAYMENT_PROVIDER=razorpay.');
+  }
   await connectDB();
   const app = createApp();
 

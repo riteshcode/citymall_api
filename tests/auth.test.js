@@ -1,4 +1,4 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, beforeEach } from '@jest/globals';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { getLastOtpForTesting } from '../src/services/sms.provider.js';
@@ -7,7 +7,14 @@ import { Otp } from '../src/models/Otp.js';
 
 const app = createApp();
 const base = env.apiBasePath;
-const MOBILE = '9876543210';
+// Fresh mobile per test: the OTP send limiter (3 / 15 min / mobile) is real and in-memory,
+// so reusing one number across tests would correctly start returning 429.
+let MOBILE;
+let mobileSeq = 0;
+beforeEach(() => {
+  mobileSeq += 1;
+  MOBILE = `98765${String(10000 + mobileSeq)}`;
+});
 
 describe('Auth — OTP flow', () => {
   it('sends an OTP and verifies it, creating a new user on first login', async () => {
@@ -92,5 +99,19 @@ describe('Auth — OTP flow', () => {
     const res = await request(app).get(`${base}/me`);
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('refresh right after login (same second) rotates cleanly instead of colliding on tokenHash', async () => {
+    await request(app).post(`${base}/auth/otp/send`).send({ mobile: MOBILE, purpose: 'login' });
+    const code = getLastOtpForTesting(MOBILE);
+    const login = await request(app).post(`${base}/auth/otp/verify`).send({ mobile: MOBILE, code, purpose: 'login' });
+
+    const refreshed = await request(app).post(`${base}/auth/refresh`).send({ refreshToken: login.body.data.refreshToken });
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.data.refreshToken).not.toBe(login.body.data.refreshToken);
+
+    const reused = await request(app).post(`${base}/auth/refresh`).send({ refreshToken: login.body.data.refreshToken });
+    expect(reused.status).toBe(401);
+    expect(reused.body.error.code).toBe('REFRESH_TOKEN_REUSED');
   });
 });

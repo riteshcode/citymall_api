@@ -12,14 +12,32 @@ export function computeSubtotal(lineItems) {
   return lineItems.reduce((sum, li) => sum + li.price * li.qty, 0);
 }
 
-export function computeDeliveryFee(subtotal) {
+/**
+ * Fee configuration used for totals. Callers pass the DB-backed store settings
+ * (settings.service.js); the env-derived default keeps these helpers usable standalone.
+ * @typedef {{ deliveryFee: number, freeDeliveryThreshold: number, handlingFee: number }} FeeSettings
+ */
+const envFeeDefaults = () => ({
+  deliveryFee: env.pricing.deliveryFeePaise,
+  freeDeliveryThreshold: env.pricing.freeDeliveryThresholdPaise,
+  handlingFee: env.pricing.handlingFeePaise,
+});
+
+/**
+ * @param {number} subtotal paise
+ * @param {FeeSettings} [settings]
+ * @param {number|null} [deliveryFeeOverride] per-pincode fee (paise) replacing settings.deliveryFee; the
+ *   free-delivery threshold still applies on top of it.
+ */
+export function computeDeliveryFee(subtotal, settings = envFeeDefaults(), deliveryFeeOverride = null) {
   if (subtotal <= 0) return 0;
-  return subtotal >= env.pricing.freeDeliveryThresholdPaise ? 0 : env.pricing.deliveryFeePaise;
+  if (subtotal >= settings.freeDeliveryThreshold) return 0;
+  return deliveryFeeOverride ?? settings.deliveryFee;
 }
 
-export function computeHandlingFee(subtotal) {
+export function computeHandlingFee(subtotal, settings = envFeeDefaults()) {
   if (subtotal <= 0) return 0;
-  return env.pricing.handlingFeePaise;
+  return settings.handlingFee;
 }
 
 /**
@@ -45,13 +63,18 @@ export function computeCouponDiscount(coupon, subtotal) {
 
 /**
  * Builds the full pricing breakdown for a set of resolved line items.
- * @param {{ lineItems: { price: number, qty: number }[], coupon?: object|null }} params
+ * @param {{
+ *   lineItems: { price: number, qty: number }[],
+ *   coupon?: object|null,
+ *   settings?: FeeSettings,
+ *   deliveryFeeOverride?: number|null
+ * }} params
  */
-export function buildPricing({ lineItems, coupon = null }) {
+export function buildPricing({ lineItems, coupon = null, settings = envFeeDefaults(), deliveryFeeOverride = null }) {
   const subtotal = computeSubtotal(lineItems);
   const discount = computeCouponDiscount(coupon, subtotal);
-  const deliveryFee = computeDeliveryFee(subtotal);
-  const handlingFee = computeHandlingFee(subtotal);
+  const deliveryFee = computeDeliveryFee(subtotal, settings, deliveryFeeOverride);
+  const handlingFee = computeHandlingFee(subtotal, settings);
   const total = clampNonNegative(subtotal - discount + deliveryFee + handlingFee);
 
   return { subtotal, discount, deliveryFee, handlingFee, total };

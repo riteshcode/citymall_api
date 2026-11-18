@@ -3,7 +3,7 @@ import { sendSuccess } from '../utils/ApiResponse.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
 import * as orderService from '../services/order.service.js';
-import { getPaymentProvider } from '../services/payment.service.js';
+import { getPaymentProvider, buildPaymentInfo } from '../services/payment.service.js';
 
 export const createOrder = catchAsync(async (req, res) => {
   const idempotencyKey = req.headers['idempotency-key'];
@@ -23,7 +23,8 @@ export const createOrder = catchAsync(async (req, res) => {
     await order.save();
   }
 
-  sendSuccess(res, { statusCode: 201, data: order });
+  // `payment` carries what the client needs to open the Razorpay sheet (null for COD).
+  sendSuccess(res, { statusCode: 201, data: { ...order.toJSON(), payment: buildPaymentInfo(order) } });
 });
 
 export const listOrders = catchAsync(async (req, res) => {
@@ -42,7 +43,18 @@ export const cancelOrder = catchAsync(async (req, res) => {
   sendSuccess(res, { data: order });
 });
 
-export const adminUpdateOrderStatus = catchAsync(async (req, res) => {
+export const adminListOrders = catchAsync(async (req, res) => {
+  const { page, limit } = req.query;
+  const { docs, total, pages } = await orderService.listAllOrders(req.query);
+  sendSuccess(res, { data: docs, meta: { total, page, limit, pages } });
+});
+
+export const adminGetOrder = catchAsync(async (req, res) => {
+  const order = await orderService.getOrderById(req.user.id, req.params.id, { isAdmin: true });
+  sendSuccess(res, { data: order });
+});
+
+export const adminUpdateOrderStatus =catchAsync(async (req, res) => {
   const order = await orderService.updateOrderStatus(req.params.id, req.body.status, req.body.note);
   sendSuccess(res, { data: order });
 });

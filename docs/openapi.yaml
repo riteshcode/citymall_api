@@ -85,6 +85,30 @@ components:
         tags: { type: array, items: { type: string } }
         isActive: { type: boolean }
 
+    StoreSettings:
+      type: object
+      properties:
+        deliveryFee: { type: integer, description: paise }
+        freeDeliveryThreshold: { type: integer, description: paise }
+        handlingFee: { type: integer, description: paise }
+        minOrderValue: { type: integer, description: paise }
+        storeOpen: { type: boolean }
+        storeTimings:
+          type: object
+          properties:
+            open: { type: string, example: '08:00' }
+            close: { type: string, example: '22:00' }
+
+    PincodeInput:
+      type: object
+      required: [pincode, areaName]
+      properties:
+        pincode: { type: string, example: '261001' }
+        areaName: { $ref: '#/components/schemas/Bilingual' }
+        isActive: { type: boolean, default: true }
+        deliveryFee: { type: integer, nullable: true, description: 'paise; null = use the store delivery fee' }
+        etaDays: { type: integer, default: 2, minimum: 0, maximum: 30 }
+
     PricingBreakdown:
       type: object
       properties:
@@ -345,6 +369,9 @@ paths:
     get:
       tags: [Cart]
       summary: Get the current user's cart with a full pricing breakdown
+      description: Optional `pincode` previews that area's delivery-fee override so the total matches checkout.
+      parameters:
+        - { name: pincode, in: query, schema: { type: string, example: '261001' } }
       security: [{ bearerAuth: [] }]
       responses:
         '200':
@@ -478,7 +505,10 @@ paths:
   /serviceability:
     get:
       tags: [Addresses]
-      summary: Check whether a pincode is serviceable
+      summary: Check whether a pincode is serviceable (reads the admin-managed pincode list)
+      description: >
+        Returns `{ pincode, serviceable, etaDays, areaName: {en,hi}|null, deliveryFee }` (deliveryFee in paise, null when not serviceable).
+        While no pincode is configured at all, every pincode is serviceable.
       parameters: [{ name: pincode, in: query, required: true, schema: { type: string } }]
       responses:
         '200': { description: OK }
@@ -487,6 +517,10 @@ paths:
     post:
       tags: [Orders]
       summary: Place an order from the current cart (idempotent)
+      description: >
+        Online methods (upi/card/netbanking) also return `data.payment` = `{ provider, keyId, providerOrderId, amount, currency }`
+        for opening the Razorpay sheet (null for COD). Checkout can fail with STORE_CLOSED (503), MIN_ORDER_VALUE, NOT_SERVICEABLE (400)
+        or PAYMENT_PROVIDER_ERROR (502; retry with the same Idempotency-Key).
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
@@ -555,6 +589,19 @@ paths:
         '400': { description: PAYMENT_SIGNATURE_INVALID }
 
   /admin/products:
+    get:
+      tags: [Admin]
+      summary: List products incl. inactive (admin only)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: q, in: query, schema: { type: string }, description: 'substring of title (en/hi), slug, brand or tag' }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: isActive, in: query, schema: { type: string, enum: ['true', 'false'] } }
+        - { name: lowStock, in: query, schema: { type: string, enum: ['true', 'false'] }, description: 'stock <= LOW_STOCK_THRESHOLD' }
+      responses:
+        '200': { description: OK }
     post:
       tags: [Admin]
       summary: Create a product (admin only)
@@ -580,6 +627,12 @@ paths:
         '200': { description: OK }
 
   /admin/categories:
+    get:
+      tags: [Admin]
+      summary: List all categories incl. inactive (admin only)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
     post:
       tags: [Admin]
       summary: Create a category (admin only)
@@ -602,6 +655,12 @@ paths:
         '201': { description: Created }
 
   /admin/banners:
+    get:
+      tags: [Admin]
+      summary: List all banners incl. inactive (admin only)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
     post:
       tags: [Admin]
       summary: Create a banner (admin only)
@@ -644,4 +703,187 @@ paths:
                   type: array
                   items: { type: string, format: binary }
       responses:
-        '201': { description: Created — returns { urls: string[] } }
+        '201': { description: 'Created - returns { urls: string[] }' }
+
+  /products/suggest:
+    get:
+      tags: [Catalog]
+      summary: Type-ahead suggestions (prefix match, top 8)
+      description: Matches the start of any title word (en/hi), brand word or tag, so "att" finds "atta". Active products only.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+      responses:
+        '200':
+          description: 'Array of { id, slug, title: {en,hi}, price (paise), image }'
+
+  /settings:
+    get:
+      tags: [Catalog]
+      summary: Public store settings
+      description: All money in paise.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccess'
+                  - type: object
+                    properties: { data: { $ref: '#/components/schemas/StoreSettings' } }
+
+  /payments/verify:
+    post:
+      tags: [Payments]
+      summary: Confirm a completed Razorpay checkout
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, razorpay_payment_id, razorpay_signature]
+              properties:
+                orderId: { type: string, description: Our order id, not Razorpay's }
+                razorpay_payment_id: { type: string }
+                razorpay_signature: { type: string }
+                razorpay_order_id: { type: string, description: Optional; cross-checked against the stored provider order id }
+      responses:
+        '200': { description: Order with paymentStatus = paid (idempotent) }
+        '400': { description: PAYMENT_SIGNATURE_INVALID | PAYMENT_NOT_REQUIRED | ORDER_NOT_PAYABLE }
+        '404': { description: ORDER_NOT_FOUND }
+
+  /admin/stats:
+    get:
+      tags: [Admin]
+      summary: Dashboard numbers (admin only)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: todayRevenue is paise; "today" is the IST day
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiSuccess'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          todayOrders: { type: integer }
+                          todayRevenue: { type: integer }
+                          pendingOrders: { type: integer, description: 'placed + confirmed + packed' }
+                          outForDelivery: { type: integer }
+                          lowStockCount: { type: integer }
+                          totalCustomers: { type: integer }
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List customers with order counts (admin only)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: q, in: query, schema: { type: string }, description: 'name or mobile, substring' }
+      responses:
+        '200': { description: 'Array of { id, name, mobile, email, isVerified, ordersCount, createdAt } + meta' }
+
+  /admin/orders:
+    get:
+      tags: [Admin]
+      summary: List all orders (admin only)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: status, in: query, schema: { type: string, enum: [placed, confirmed, packed, shipped, out_for_delivery, delivered, cancelled] } }
+        - { name: from, in: query, schema: { type: string, example: '2026-11-01' }, description: 'YYYY-MM-DD (start of that IST day) or ISO datetime' }
+        - { name: to, in: query, schema: { type: string, example: '2026-11-14' }, description: 'YYYY-MM-DD (end of that IST day, inclusive) or ISO datetime' }
+        - { name: q, in: query, schema: { type: string }, description: 'orderNumber or customer mobile, substring' }
+      responses:
+        '200': { description: 'Orders with user populated as { id, name, mobile } + meta' }
+
+  /admin/orders/{id}:
+    get:
+      tags: [Admin]
+      summary: Get any order with the full customer card (admin only)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK }
+        '404': { description: ORDER_NOT_FOUND }
+
+  /admin/settings:
+    get:
+      tags: [Admin]
+      summary: Get store settings (admin only)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: OK }
+    patch:
+      tags: [Admin]
+      summary: Change store settings (admin only; at least one field)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deliveryFee: { type: integer, description: paise }
+                freeDeliveryThreshold: { type: integer, description: 'paise; delivery is free at/above this subtotal (0 = always free)' }
+                handlingFee: { type: integer, description: paise }
+                minOrderValue: { type: integer, description: 'paise; 0 = no minimum' }
+                storeOpen: { type: boolean, description: 'false => POST /orders returns 503 STORE_CLOSED' }
+                storeTimings:
+                  type: object
+                  properties:
+                    open: { type: string, example: '08:00' }
+                    close: { type: string, example: '22:00' }
+      responses:
+        '200': { description: OK }
+
+  /admin/pincodes:
+    get:
+      tags: [Admin]
+      summary: List serviceable areas (admin only)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: q, in: query, schema: { type: string }, description: 'pincode or area name, substring' }
+        - { name: isActive, in: query, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Admin]
+      summary: Add a serviceable area (admin only)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PincodeInput' }
+      responses:
+        '201': { description: Created }
+        '409': { description: DUPLICATE_KEY }
+
+  /admin/pincodes/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update a serviceable area (admin only)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK }
+        '404': { description: PINCODE_NOT_FOUND }
+    delete:
+      tags: [Admin]
+      summary: Delete a serviceable area (hard delete; admin only)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK }
+        '404': { description: PINCODE_NOT_FOUND }
