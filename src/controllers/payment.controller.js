@@ -10,6 +10,7 @@ import {
   buildPaymentInfo,
 } from '../services/payment.service.js';
 import { Order } from '../models/Order.js';
+import { logger } from '../config/logger.js';
 
 function extractPayment(payload) {
   return payload?.payload?.payment?.entity;
@@ -44,13 +45,21 @@ export const handleWebhook = catchAsync(async (req, res) => {
   const providerOrderId = extractProviderOrderId(payload);
   const status = extractStatus(payload);
 
-  const order = await Order.findOne({ paymentProviderOrderId: providerOrderId });
+  if (!providerOrderId) return sendSuccess(res, { data: { received: true, matched: false } });
+
+  // Current gateway order, or one abandoned by a payment retry / switch to COD (the customer may still have paid it).
+  const order = await Order.findOne({
+    $or: [{ paymentProviderOrderId: providerOrderId }, { previousProviderOrderIds: providerOrderId }],
+  });
   if (!order) {
     // Ack with 200 regardless so the provider doesn't retry forever on an order we can't map.
     return sendSuccess(res, { data: { received: true, matched: false } });
   }
 
   if (status === 'paid') {
+    if (order.paymentMethod === 'cod') {
+      logger.warn(`[Payments] order ${order.orderNumber} was paid online after being switched to COD - reconcile manually`);
+    }
     await markOrderPaid(order._id, extractPayment(payload)?.id, 'Payment confirmed via webhook');
   } else if (status === 'failed') {
     await markPaymentFailed(order._id);

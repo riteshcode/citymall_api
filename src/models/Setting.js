@@ -17,6 +17,19 @@ const settingSchema = new mongoose.Schema(
     minOrderValue: { type: Number, required: true, min: 0, default: 0 },
     // false => POST /orders is rejected with STORE_CLOSED.
     storeOpen: { type: Boolean, required: true, default: true },
+    // Public store details (legal pages, invoices, contact). Empty string = not filled in yet.
+    storeName: { type: String, trim: true, default: 'Aali Market' },
+    phone: { type: String, trim: true, default: '' },
+    whatsapp: { type: String, trim: true, default: '' },
+    email: { type: String, trim: true, lowercase: true, default: '' },
+    address: {
+      line1: { type: String, trim: true, default: '' },
+      city: { type: String, trim: true, default: '' },
+      state: { type: String, trim: true, default: '' },
+      pincode: { type: String, trim: true, default: '' },
+    },
+    fssaiNumber: { type: String, trim: true, default: '' },
+    gstin: { type: String, trim: true, uppercase: true, default: '' },
     // Display-only ("HH:mm", 24h). Not enforced automatically.
     storeTimings: {
       open: { type: String, required: true, default: '08:00' },

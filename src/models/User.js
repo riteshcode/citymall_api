@@ -13,9 +13,11 @@ const userSchema = new mongoose.Schema(
     },
     name: { type: String, required: true, trim: true },
     email: { type: String, trim: true, lowercase: true, default: undefined },
-    role: { type: String, enum: ['customer', 'admin'], default: 'customer' },
+    role: { type: String, enum: ['customer', 'admin', 'rider'], default: 'customer' },
     addresses: { type: [addressSchema], default: [] },
     isVerified: { type: Boolean, default: false },
+    // false blocks login and every authenticated call (used to deactivate riders).
+    isActive: { type: Boolean, default: true },
     refreshTokenVersion: { type: Number, default: 0, private: true },
   },
   { timestamps: true }

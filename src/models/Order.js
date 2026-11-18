@@ -60,14 +60,27 @@ const orderSchema = new mongoose.Schema(
     expectedDeliveryAt: { type: Date, default: null },
     idempotencyKey: { type: String, required: true, unique: true },
     paymentProviderOrderId: { type: String, default: null },
+    // Earlier gateway orders of this order (replaced by a payment retry or a switch to COD). Kept so a late
+    // webhook for an abandoned attempt can still be matched to the order. Never serialised.
+    previousProviderOrderIds: { type: [String], default: [], private: true },
     // Gateway payment id (e.g. Razorpay pay_xxx), set when payment is verified / captured.
     paymentId: { type: String, default: null },
     cancelReason: { type: String, default: null },
+    deliveryNote: { type: String, trim: true, maxlength: 200, default: '' },
+    // 4-digit code the customer reads out to the rider. `private`: stripped from every serialisation; only the
+    // customer-facing order endpoints add it back explicitly. Never shown to admin or rider APIs.
+    deliveryOtp: { type: String, default: null, private: true },
+    deliveryOtpAttempts: { type: Number, default: 0, private: true },
+    rider: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Paise the rider reports having collected (COD only), set when the order is delivered.
+    cashCollected: { type: Number, min: 0, default: null },
   },
   { timestamps: true }
 );
 
 orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ createdAt: -1 });
+orderSchema.index({ rider: 1, status: 1, createdAt: -1 });
 
 toJSONPlugin(orderSchema);
 

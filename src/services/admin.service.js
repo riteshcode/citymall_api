@@ -3,6 +3,7 @@ import { Product } from '../models/Product.js';
 import { User } from '../models/User.js';
 import { env } from '../config/env.js';
 import { startOfStoreDay } from '../utils/dates.js';
+import { EARNING_ORDER_FILTER } from '../utils/orderFilters.js';
 import { containsRegex } from '../utils/regex.js';
 import { paginateQuery } from '../utils/mongoosePlugins.js';
 
@@ -16,7 +17,7 @@ import { paginateQuery } from '../utils/mongoosePlugins.js';
  */
 export async function getDashboardStats() {
   const todayStart = startOfStoreDay();
-  const earning = { status: { $ne: 'cancelled' }, paymentStatus: { $nin: ['failed', 'refunded'] } };
+  const earning = EARNING_ORDER_FILTER;
 
   const [today, pendingOrders, outForDelivery, lowStockCount, totalCustomers] = await Promise.all([
     Order.aggregate([

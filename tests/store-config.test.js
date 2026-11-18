@@ -39,6 +39,14 @@ describe('Store settings', () => {
       minOrderValue: 0,
       storeOpen: true,
       storeTimings: { open: '08:00', close: '22:00' },
+      // store info (see store-info.test.js): name has a default, the rest is blank until an admin fills it in
+      storeName: 'Aali Market',
+      phone: '',
+      whatsapp: '',
+      email: '',
+      address: { line1: '', city: '', state: '', pincode: '' },
+      fssaiNumber: '',
+      gstin: '',
     });
   });
 

@@ -12,3 +12,4 @@ export { Banner } from './Banner.js';
 export { RefreshToken } from './RefreshToken.js';
 export { Setting } from './Setting.js';
 export { Pincode } from './Pincode.js';
+export { PushSubscription } from './PushSubscription.js';

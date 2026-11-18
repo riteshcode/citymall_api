@@ -6,10 +6,10 @@ import { issueTokenPair } from '../src/services/auth.service.js';
 let mobileCounter = 9000000000;
 
 /** Creates a verified customer (or admin) and returns { user, accessToken, refreshToken }. */
-export async function createAuthedUser({ role = 'customer', mobile } = {}) {
+export async function createAuthedUser({ role = 'customer', mobile, name } = {}) {
   const user = await User.create({
     mobile: mobile || String(mobileCounter++),
-    name: role === 'admin' ? 'Aali Admin' : 'Test Customer',
+    name: name || (role === 'admin' ? 'Aali Admin' : role === 'rider' ? 'Test Rider' : 'Test Customer'),
     role,
     isVerified: true,
   });
@@ -60,7 +60,7 @@ export async function createAddress(user, overrides = {}) {
 }
 
 /** Adds `product` to the user's cart and places an order. Returns the supertest response. */
-export async function placeOrder(app, base, who, product, addressId, { key, paymentMethod = 'cod', qty = 1 } = {}) {
+export async function placeOrder(app, base, who, product, addressId, { key, paymentMethod = 'cod', qty = 1, deliveryNote } = {}) {
   const { default: request } = await import('supertest');
   const h = { Authorization: `Bearer ${who.accessToken}` };
   await request(app).post(`${base}/cart/items`).set(h).send({ productId: product.id, qty });
@@ -68,10 +68,18 @@ export async function placeOrder(app, base, who, product, addressId, { key, paym
     .post(`${base}/orders`)
     .set(h)
     .set('Idempotency-Key', key || `key-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-    .send({ addressId, paymentMethod });
+    .send({ addressId, paymentMethod, ...(deliveryNote !== undefined ? { deliveryNote } : {}) });
 }
 
 /** Store-local (IST) calendar date `daysAgo` days back, as YYYY-MM-DD — same convention as the API's from/to filters. */
 export function istDate(daysAgo = 0) {
   return new Date(Date.now() + 330 * 60000 - daysAgo * 86400000).toISOString().slice(0, 10);
+}
+
+export const bearer = (who) => ({ Authorization: `Bearer ${who.accessToken}` });
+
+/** Admin sets an order's status (the existing PATCH /admin/orders/:id/status). */
+export async function adminSetStatus(app, base, admin, orderId, status, note) {
+  const { default: request } = await import('supertest');
+  return request(app).patch(`${base}/admin/orders/${orderId}/status`).set(bearer(admin)).send({ status, ...(note ? { note } : {}) });
 }

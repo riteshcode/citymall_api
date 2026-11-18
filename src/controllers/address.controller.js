@@ -33,6 +33,11 @@ export const updateAddress = catchAsync(async (req, res) => {
   if (req.body.isDefault) {
     user.addresses.forEach((a) => (a.isDefault = false));
   }
+  // location: null clears the pin; the field is then absent, exactly like an address that never had one.
+  if (req.body.location === null) {
+    address.set('location', undefined);
+    delete req.body.location;
+  }
   Object.assign(address, req.body);
   await user.save();
   sendSuccess(res, { data: address });

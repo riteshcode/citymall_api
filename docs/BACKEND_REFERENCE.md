@@ -10,7 +10,7 @@ Everything below the overview is copied verbatim from the repo by `npm run refer
 | Base path | `API_BASE_PATH` env, default **/api/v1**. `/health` is at the server root. |
 | CORS | `cors({ origin: env.cors.origin })`; `CORS_ORIGIN` default `*`. One string only — a comma-separated list is **not** split into several origins. |
 | Uploaded images | No `/uploads` path, no static serving. `POST /admin/uploads` (multipart field `images`, max 6, 5 MB each) → Cloudinary (`STORAGE_PROVIDER=cloudinary`, default; `s3` still available) → `201 { success, data: { urls: ["https://res.cloudinary.com/<cloud>/image/upload/f_auto,q_auto/v<n>/aali-market/products/<id>"] }, error: null }`. Errors: `VALIDATION_ERROR`, `FILE_TOO_LARGE` (413), `UPLOAD_FAILED` (400/502/503). |
-| User roles | `User.role` ∈ `customer` \| `admin` (default `customer`) |
+| User roles | `User.role` ∈ `customer` \| `admin` \| `rider` (default `customer`) |
 | Admin check | `authenticate` verifies the JWT and loads the user from the DB each request; `requireRole('admin')` compares the DB role (not the token claim). |
 | Money | integer **paise** everywhere (₹1 = 100) |
 | Envelope | `{ success, data, error, meta? }`; errors `{ code, message, details? }` |
@@ -28,7 +28,9 @@ DELETE /cart                   POST|DELETE /cart/coupon
 GET|POST /addresses            PATCH|DELETE /addresses/:id  POST /addresses/:id/default
 GET  /serviceability?pincode=
 POST /orders                   GET /orders                  GET /orders/:id          POST /orders/:id/cancel
+POST /orders/:id/payment       PATCH /orders/:id/payment-method   POST /orders/:id/reorder
 POST /payments/verify          POST /payments/webhook       (webhook: raw body + HMAC, no JWT)
+GET  /push/vapid-public-key    POST|DELETE /me/push-subscriptions
 GET  /wishlist                 POST|DELETE /wishlist/:productId
 ```
 
@@ -52,6 +54,27 @@ Prefix search for type-ahead, top 8 → `[{ id, slug, title:{en,hi}, price, imag
 
 `POST /orders` with `paymentMethod` upi/card/netbanking returns, besides the order, `data.payment = { provider, keyId, providerOrderId, amount, currency }` (null for COD). Open Razorpay checkout with `keyId` + `providerOrderId`, then `POST /payments/verify { orderId, razorpay_payment_id, razorpay_signature, razorpay_order_id? }` (`orderId` is OUR order id). Signature = HMAC-SHA256(`<razorpay_order_id>|<razorpay_payment_id>`, `RAZORPAY_KEY_SECRET`). The webhook confirms independently; both paths are idempotent. `PAYMENT_PROVIDER=mock` (default) never verifies in production.
 
+### Store info
+
+`GET /settings` (public) and admin `GET|PATCH /admin/settings` also carry `storeName`, `phone`, `whatsapp`, `email`, `address { line1, city, state, pincode }`, `fssaiNumber` (14 digits), `gstin` (15 chars) for legal pages / invoices / contact. Every value can be cleared with `""`; `address` merges field by field.
+
+### Delivery: notes, location, riders, OTP
+
+- `POST /orders` accepts `deliveryNote` (≤ 200 chars). Addresses accept an optional `location { lat, lng }` (copied into the order snapshot; `null` on PATCH clears it).
+- Every order gets a random 4-digit `deliveryOtp`. **Only the owner sees it** (`POST /orders`, `GET /orders/:id`); it is stripped from every other serialisation — admin, rider, push.
+- Admins manage riders (`/admin/riders`, `role: rider`, same OTP login) and assign orders (`PATCH /admin/orders/:id/assign { riderId | null }`).
+- Rider app (`/rider/*`, rider token only): `GET /orders` (mine only), `PATCH /orders/:id/out-for-delivery`, `POST /orders/:id/deliver { otp: "1234", cashCollected }`. Wrong OTP = 400 `INVALID_DELIVERY_OTP` (`details.attemptsLeft`); after `DELIVERY_OTP_MAX_ATTEMPTS` (5) wrong tries = 429 `DELIVERY_OTP_LOCKED`. Unpaid COD needs `cashCollected` (paise) and becomes paid.
+
+### Payment retry, COD switch, reorder
+
+- `POST /orders/:id/payment` → `{ payment: {...} }` with a fresh gateway order (else 400 `PAYMENT_NOT_RETRYABLE`). Abandoned gateway orders are remembered, so a late webhook still pays the order.
+- `PATCH /orders/:id/payment-method { paymentMethod: "cod" }` (else 400 `PAYMENT_METHOD_NOT_CHANGEABLE`).
+- `POST /orders/:id/reorder` → `{ cart, skipped: [{ productId, title, reason: inactive|out_of_stock|qty_reduced, requested, added }] }`.
+
+### Push notifications (PWA)
+
+`GET /push/vapid-public-key` → `POST /me/push-subscriptions` (the browser's PushSubscription JSON; only browser vendors' push services are accepted) → on order status changes (admin, rider, confirmed payment) the customer gets `{ title, body, url: "/orders/<id>" }` (English + Hindi). 404/410 removes the subscription. Needs `VAPID_*` (`npm run vapid:generate`).
+
 ### Admin endpoints (`/admin/*`, admin token)
 
 | | |
@@ -67,8 +90,18 @@ Prefix search for type-ahead, top 8 → `[{ id, slug, title:{en,hi}, price, imag
 | `GET|PATCH /settings` | see above |
 | `GET|POST /pincodes`, `PATCH|DELETE /pincodes/:id` | DELETE is a hard delete |
 | `POST /uploads` | multipart field `images` |
+| `GET /orders/latest?since=<ISO>` | new-order alert: `{ count, orders: [{ id, orderNumber, total, createdAt }] }` (newest 10; `since` exclusive) |
+| `PATCH /orders/:id/assign` | `{ riderId }` (null unassigns) → order with `rider { id, name, mobile }` |
+| `GET|POST /riders`, `PATCH /riders/:id` | delivery riders `{ name, mobile, isActive }` (+ `activeOrders`) |
+| `GET /reports/sales?from&to&groupBy=day` (or week, month) | `[{ period, orders, revenue, avgOrderValue }]` |
+| `GET /reports/top-products?from&to&limit` | `[{ productId, title, qtySold, revenue }]` |
+| `GET /reports/cod?date=YYYY-MM-DD` | `{ totalExpected, totalCollected, byRider: [{ rider, orders, expected, collected }] }` |
+| `PATCH /products/bulk` | `[{ id, price?, mrp?, stock?, isActive? }]` (≤ 200) → `{ updated, failed: [{ id, error }] }` |
+| `GET /products/export` | CSV of all products (paise; UTF-8 BOM) |
+| `POST /products/import?dryRun=` | multipart `file` (.csv ≤ 2 MB, ≤ 2000 rows) → `{ created, updated, errors: [{ row, error }], dryRun }` |
+| `GET /reviews?page&limit&productId&rating`, `DELETE /reviews/:id` | moderation; delete recalculates the product rating |
 
-Not available: role/user management (admins are created by `npm run seed` or directly in the DB).
+Not available: promoting an existing customer to admin/rider (admins come from `npm run seed` or the DB; riders are created with `POST /admin/riders` for a NEW mobile).
 
 ---
 
@@ -110,7 +143,7 @@ export default router;
 import { Router } from 'express';
 import { validate } from '../middleware/validate.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { upload } from '../middleware/upload.js';
+import { upload, uploadCsv } from '../middleware/upload.js';
 
 import * as categoryController from '../controllers/category.controller.js';
 import * as productController from '../controllers/product.controller.js';
@@ -121,12 +154,23 @@ import * as uploadController from '../controllers/upload.controller.js';
 import * as adminController from '../controllers/admin.controller.js';
 import * as settingsController from '../controllers/settings.controller.js';
 import * as pincodeController from '../controllers/pincode.controller.js';
+import * as riderController from '../controllers/rider.controller.js';
+import * as reportController from '../controllers/report.controller.js';
 
 import { createCategorySchema, updateCategorySchema, categoryIdParamSchema } from '../validations/category.validation.js';
-import { createProductSchema, updateProductSchema, productIdParamSchema } from '../validations/product.validation.js';
+import {
+  createProductSchema,
+  updateProductSchema,
+  productIdParamSchema,
+  bulkUpdateProductsSchema,
+  importProductsSchema,
+} from '../validations/product.validation.js';
 import { createCouponSchema, updateCouponSchema, couponIdParamSchema } from '../validations/coupon.validation.js';
 import { createBannerSchema, updateBannerSchema, bannerIdParamSchema } from '../validations/banner.validation.js';
 import { adminListProductsSchema, adminListUsersSchema } from '../validations/admin.validation.js';
+import { adminListRidersSchema, createRiderSchema, updateRiderSchema } from '../validations/rider.validation.js';
+import { salesReportSchema, topProductsSchema, codReportSchema } from '../validations/report.validation.js';
+import { adminListReviewsSchema, reviewIdParamSchema } from '../validations/review.validation.js';
 import { updateSettingsSchema } from '../validations/settings.validation.js';
 import {
   listPincodesSchema,
@@ -134,7 +178,13 @@ import {
   updatePincodeSchema,
   pincodeIdParamSchema,
 } from '../validations/pincode.validation.js';
-import { updateOrderStatusSchema, adminListOrdersSchema, orderIdParamSchema } from '../validations/order.validation.js';
+import {
+  updateOrderStatusSchema,
+  adminListOrdersSchema,
+  orderIdParamSchema,
+  assignRiderSchema,
+  latestOrdersSchema,
+} from '../validations/order.validation.js';
 
 const router = Router();
 
@@ -157,6 +207,10 @@ router.delete('/pincodes/:id', validate(pincodeIdParamSchema), pincodeController
 
 // Products
 router.get('/products', validate(adminListProductsSchema), adminController.listProducts);
+// bulk / export / import MUST be registered before '/products/:id', which would treat them as an id.
+router.patch('/products/bulk', validate(bulkUpdateProductsSchema), adminController.bulkUpdateProducts);
+router.get('/products/export', adminController.exportProducts);
+router.post('/products/import', uploadCsv, validate(importProductsSchema), adminController.importProducts);
 router.post('/products', validate(createProductSchema), productController.createProduct);
 router.patch('/products/:id', validate(updateProductSchema), productController.updateProduct);
 router.delete('/products/:id', validate(productIdParamSchema), productController.deleteProduct);
@@ -181,8 +235,24 @@ router.delete('/banners/:id', validate(bannerIdParamSchema), bannerController.de
 
 // Orders
 router.get('/orders', validate(adminListOrdersSchema), orderController.adminListOrders);
+router.get('/orders/latest', validate(latestOrdersSchema), orderController.adminLatestOrders); // before '/orders/:id'
 router.get('/orders/:id', validate(orderIdParamSchema), orderController.adminGetOrder);
+router.patch('/orders/:id/assign', validate(assignRiderSchema), orderController.adminAssignRider);
 router.patch('/orders/:id/status', validate(updateOrderStatusSchema), orderController.adminUpdateOrderStatus);
+
+// Delivery riders (they log in through the normal OTP flow; role = rider)
+router.get('/riders', validate(adminListRidersSchema), riderController.listRiders);
+router.post('/riders', validate(createRiderSchema), riderController.createRider);
+router.patch('/riders/:id', validate(updateRiderSchema), riderController.updateRider);
+
+// Reports
+router.get('/reports/sales', validate(salesReportSchema), reportController.sales);
+router.get('/reports/top-products', validate(topProductsSchema), reportController.topProducts);
+router.get('/reports/cod', validate(codReportSchema), reportController.cod);
+
+// Reviews moderation
+router.get('/reviews', validate(adminListReviewsSchema), adminController.listReviews);
+router.delete('/reviews/:id', validate(reviewIdParamSchema), adminController.deleteReview);
 
 // Media uploads (product/category/banner images)
 router.post('/uploads', upload.array('images', 6), uploadController.uploadImages);
@@ -297,18 +367,22 @@ import paymentRoutes from './payment.routes.js';
 import adminRoutes from './admin.routes.js';
 import wishlistRoutes from './wishlist.routes.js';
 import settingsRoutes from './settings.routes.js';
+import riderRoutes from './rider.routes.js';
+import pushRoutes from './push.routes.js';
 
 const router = Router();
 
 router.use(authRoutes);
 router.use(catalogRoutes);
 router.use(addressRoutes);
+router.use(pushRoutes);
 router.use('/cart', cartRoutes);
 router.use('/orders', orderRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/admin', adminRoutes);
 router.use('/wishlist', wishlistRoutes);
 router.use('/settings', settingsRoutes);
+router.use('/rider', riderRoutes);
 
 export default router;
 ```
@@ -325,6 +399,9 @@ import {
   listOrdersSchema,
   orderIdParamSchema,
   cancelOrderSchema,
+  retryPaymentSchema,
+  changePaymentMethodSchema,
+  reorderSchema,
 } from '../validations/order.validation.js';
 
 const router = Router();
@@ -334,6 +411,9 @@ router.post('/', validate(createOrderSchema), orderController.createOrder);
 router.get('/', validate(listOrdersSchema), orderController.listOrders);
 router.get('/:id', validate(orderIdParamSchema), orderController.getOrder);
 router.post('/:id/cancel', validate(cancelOrderSchema), orderController.cancelOrder);
+router.post('/:id/payment', validate(retryPaymentSchema), orderController.retryPayment);
+router.patch('/:id/payment-method', validate(changePaymentMethodSchema), orderController.changePaymentMethod);
+router.post('/:id/reorder', validate(reorderSchema), orderController.reorder);
 
 export default router;
 ```
@@ -354,6 +434,46 @@ const router = Router();
 router.post('/webhook', paymentController.handleWebhook);
 
 router.post('/verify', authenticate, validate(verifyPaymentSchema), paymentController.verifyPayment);
+
+export default router;
+```
+
+### `src/routes/push.routes.js`
+
+```js
+import { Router } from 'express';
+import { validate } from '../middleware/validate.js';
+import { authenticate } from '../middleware/auth.js';
+import * as pushController from '../controllers/push.controller.js';
+import { pushSubscriptionSchema, removePushSubscriptionSchema } from '../validations/push.validation.js';
+
+const router = Router();
+
+// Mounted at the API root, so authenticate is applied per route (a router-level guard would capture later public routes).
+router.get('/push/vapid-public-key', pushController.getVapidPublicKey);
+router.post('/me/push-subscriptions', authenticate, validate(pushSubscriptionSchema), pushController.subscribe);
+router.delete('/me/push-subscriptions', authenticate, validate(removePushSubscriptionSchema), pushController.unsubscribe);
+
+export default router;
+```
+
+### `src/routes/rider.routes.js`
+
+```js
+import { Router } from 'express';
+import { validate } from '../middleware/validate.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
+import * as riderController from '../controllers/rider.controller.js';
+import { riderOrdersSchema, riderOrderIdSchema, deliverOrderSchema } from '../validations/rider.validation.js';
+
+const router = Router();
+
+// Everything under /rider/* is for delivery riders only (they sign in with the normal OTP flow).
+router.use(authenticate, requireRole('rider'));
+
+router.get('/orders', validate(riderOrdersSchema), riderController.listMyOrders);
+router.patch('/orders/:id/out-for-delivery', validate(riderOrderIdSchema), riderController.markOutForDelivery);
+router.post('/orders/:id/deliver', validate(deliverOrderSchema), riderController.deliverOrder);
 
 export default router;
 ```
@@ -651,14 +771,27 @@ const orderSchema = new mongoose.Schema(
     expectedDeliveryAt: { type: Date, default: null },
     idempotencyKey: { type: String, required: true, unique: true },
     paymentProviderOrderId: { type: String, default: null },
+    // Earlier gateway orders of this order (replaced by a payment retry or a switch to COD). Kept so a late
+    // webhook for an abandoned attempt can still be matched to the order. Never serialised.
+    previousProviderOrderIds: { type: [String], default: [], private: true },
     // Gateway payment id (e.g. Razorpay pay_xxx), set when payment is verified / captured.
     paymentId: { type: String, default: null },
     cancelReason: { type: String, default: null },
+    deliveryNote: { type: String, trim: true, maxlength: 200, default: '' },
+    // 4-digit code the customer reads out to the rider. `private`: stripped from every serialisation; only the
+    // customer-facing order endpoints add it back explicitly. Never shown to admin or rider APIs.
+    deliveryOtp: { type: String, default: null, private: true },
+    deliveryOtpAttempts: { type: Number, default: 0, private: true },
+    rider: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Paise the rider reports having collected (COD only), set when the order is delivered.
+    cashCollected: { type: Number, min: 0, default: null },
   },
   { timestamps: true }
 );
 
 orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ createdAt: -1 });
+orderSchema.index({ rider: 1, status: 1, createdAt: -1 });
 
 toJSONPlugin(orderSchema);
 
@@ -769,6 +902,33 @@ toJSONPlugin(productSchema);
 export const Product = mongoose.model('Product', productSchema);
 ```
 
+### `src/models/PushSubscription.js`
+
+```js
+import mongoose from 'mongoose';
+import { toJSONPlugin } from '../utils/mongoosePlugins.js';
+
+/** A browser's Web Push subscription (PWA). One row per browser/device; `endpoint` is globally unique. */
+const pushSubscriptionSchema = new mongoose.Schema(
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    endpoint: { type: String, required: true, unique: true },
+    expirationTime: { type: Number, default: null },
+    // Encryption secrets for this subscription — never serialised.
+    keys: {
+      p256dh: { type: String, required: true, private: true },
+      auth: { type: String, required: true, private: true },
+    },
+    userAgent: { type: String, default: '' },
+  },
+  { timestamps: true }
+);
+
+toJSONPlugin(pushSubscriptionSchema);
+
+export const PushSubscription = mongoose.model('PushSubscription', pushSubscriptionSchema);
+```
+
 ### `src/models/RefreshToken.js`
 
 ```js
@@ -845,6 +1005,19 @@ const settingSchema = new mongoose.Schema(
     minOrderValue: { type: Number, required: true, min: 0, default: 0 },
     // false => POST /orders is rejected with STORE_CLOSED.
     storeOpen: { type: Boolean, required: true, default: true },
+    // Public store details (legal pages, invoices, contact). Empty string = not filled in yet.
+    storeName: { type: String, trim: true, default: 'Aali Market' },
+    phone: { type: String, trim: true, default: '' },
+    whatsapp: { type: String, trim: true, default: '' },
+    email: { type: String, trim: true, lowercase: true, default: '' },
+    address: {
+      line1: { type: String, trim: true, default: '' },
+      city: { type: String, trim: true, default: '' },
+      state: { type: String, trim: true, default: '' },
+      pincode: { type: String, trim: true, default: '' },
+    },
+    fssaiNumber: { type: String, trim: true, default: '' },
+    gstin: { type: String, trim: true, uppercase: true, default: '' },
     // Display-only ("HH:mm", 24h). Not enforced automatically.
     storeTimings: {
       open: { type: String, required: true, default: '08:00' },
@@ -877,9 +1050,11 @@ const userSchema = new mongoose.Schema(
     },
     name: { type: String, required: true, trim: true },
     email: { type: String, trim: true, lowercase: true, default: undefined },
-    role: { type: String, enum: ['customer', 'admin'], default: 'customer' },
+    role: { type: String, enum: ['customer', 'admin', 'rider'], default: 'customer' },
     addresses: { type: [addressSchema], default: [] },
     isVerified: { type: Boolean, default: false },
+    // false blocks login and every authenticated call (used to deactivate riders).
+    isActive: { type: Boolean, default: true },
     refreshTokenVersion: { type: Number, default: 0, private: true },
   },
   { timestamps: true }
@@ -930,6 +1105,7 @@ export { Banner } from './Banner.js';
 export { RefreshToken } from './RefreshToken.js';
 export { Setting } from './Setting.js';
 export { Pincode } from './Pincode.js';
+export { PushSubscription } from './PushSubscription.js';
 ```
 
 ### `src/models/shared/address.js`
@@ -937,6 +1113,15 @@ export { Pincode } from './Pincode.js';
 ```js
 import mongoose from 'mongoose';
 import { toJSONPlugin } from '../../utils/mongoosePlugins.js';
+
+// Optional pin so a rider can find the house. Both coordinates or none.
+const locationSchema = new mongoose.Schema(
+  {
+    lat: { type: Number, required: true, min: -90, max: 90 },
+    lng: { type: Number, required: true, min: -180, max: 180 },
+  },
+  { _id: false }
+);
 
 /** Full address shape shared between User.addresses[] and Order.shippingAddress snapshot. */
 export const addressSchema = new mongoose.Schema(
@@ -949,6 +1134,7 @@ export const addressSchema = new mongoose.Schema(
     state: { type: String, required: true, trim: true },
     pincode: { type: String, required: true, trim: true, match: /^[1-9]\d{5}$/ },
     isDefault: { type: Boolean, default: false },
+    location: { type: locationSchema, default: undefined },
   },
   { timestamps: true }
 );
@@ -979,7 +1165,7 @@ export const bilingualSchema = new mongoose.Schema(
 
 ```js
 import { z } from 'zod';
-import { pincodeSchema, objectIdSchema } from '../utils/zodHelpers.js';
+import { pincodeSchema, objectIdSchema, locationSchema } from '../utils/zodHelpers.js';
 
 const addressBody = z
   .object({
@@ -991,6 +1177,7 @@ const addressBody = z
     state: z.string().trim().min(1).max(80),
     pincode: pincodeSchema,
     isDefault: z.boolean().default(false),
+    location: locationSchema.optional(),
   })
   .strict();
 
@@ -998,7 +1185,8 @@ export const createAddressSchema = { body: addressBody };
 
 export const updateAddressSchema = {
   params: z.object({ id: objectIdSchema }).strict(),
-  body: addressBody.partial(),
+  // location: null clears a previously saved pin
+  body: addressBody.partial().extend({ location: locationSchema.nullable().optional() }),
 };
 
 export const addressIdParamSchema = {
@@ -1276,6 +1464,7 @@ export const createOrderSchema = {
     .object({
       addressId: objectIdSchema,
       paymentMethod: z.enum(['cod', 'upi', 'card', 'netbanking']),
+      deliveryNote: z.string().trim().max(200).optional(),
     })
     .strict(),
 };
@@ -1322,6 +1511,30 @@ export const updateOrderStatusSchema = {
     .object({
       status: z.enum(['placed', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled']),
       note: z.string().trim().max(300).optional(),
+    })
+    .strict(),
+};
+
+// Online payment retry / switch to COD / reorder: the order id is the only input.
+export const retryPaymentSchema = { params: z.object({ id: objectIdSchema }).strict() };
+export const reorderSchema = { params: z.object({ id: objectIdSchema }).strict() };
+
+export const changePaymentMethodSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+  body: z.object({ paymentMethod: z.literal('cod') }).strict(),
+};
+
+export const assignRiderSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+  // riderId: null unassigns
+  body: z.object({ riderId: objectIdSchema.nullable() }).strict(),
+};
+
+export const latestOrdersSchema = {
+  query: z
+    .object({
+      // ISO datetime WITH a zone (e.g. 2026-11-18T10:30:00.000Z or ...+05:30) — what Date#toISOString() gives
+      since: z.string().datetime({ offset: true }).transform((v) => new Date(v)),
     })
     .strict(),
 };
@@ -1479,6 +1692,94 @@ export const updateProductSchema = {
     })
     .strict(),
 };
+
+// ---- bulk / CSV (admin)
+// The body is only checked to be an array here; each ROW is validated individually by the service, so one bad
+// row is reported in `failed` instead of rejecting the whole request.
+export const bulkUpdateProductsSchema = {
+  body: z.array(z.unknown()).min(1, 'Send at least one row').max(200, 'At most 200 rows per request'),
+};
+
+export const importProductsSchema = {
+  query: z.object({ dryRun: z.enum(['true', 'false']).transform((v) => v === 'true').optional() }).strict(),
+};
+```
+
+### `src/validations/push.validation.js`
+
+```js
+import { z } from 'zod';
+
+const decodedLength = (n) => (value) => Buffer.from(value, 'base64url').length === n;
+
+// Exactly what `PushSubscription.toJSON()` produces in the browser.
+export const pushSubscriptionSchema = {
+  body: z
+    .object({
+      endpoint: z.string().trim().url().max(2048),
+      expirationTime: z.number().nullable().optional(),
+      keys: z
+        .object({
+          p256dh: z.string().regex(/^[A-Za-z0-9_-]+={0,2}$/).refine(decodedLength(65), 'p256dh must be a 65-byte public key'),
+          auth: z.string().regex(/^[A-Za-z0-9_-]+={0,2}$/).refine(decodedLength(16), 'auth must be a 16-byte secret'),
+        })
+        .strict(),
+    })
+    .strict(),
+};
+
+export const removePushSubscriptionSchema = {
+  body: z.object({ endpoint: z.string().trim().url().max(2048) }).strict(),
+};
+```
+
+### `src/validations/report.validation.js`
+
+```js
+import { z } from 'zod';
+import { parseDateBoundary } from '../utils/dates.js';
+
+// YYYY-MM-DD = the whole IST day; an ISO datetime is used as given.
+const dateParam = z
+  .string()
+  .trim()
+  .refine((v) => parseDateBoundary(v, 'start') !== null, { message: 'Use YYYY-MM-DD or an ISO datetime' });
+
+const rangeIsOrdered = (v) => !v.from || !v.to || parseDateBoundary(v.from, 'start') <= parseDateBoundary(v.to, 'end');
+const rangeError = { message: '"from" must not be after "to"', path: ['from'] };
+
+export const salesReportSchema = {
+  query: z
+    .object({
+      from: dateParam.optional(), // default: 30 days before `to`
+      to: dateParam.optional(), // default: today (IST)
+      groupBy: z.enum(['day', 'week', 'month']).default('day'),
+    })
+    .strict()
+    .refine(rangeIsOrdered, rangeError),
+};
+
+export const topProductsSchema = {
+  query: z
+    .object({
+      from: dateParam.optional(),
+      to: dateParam.optional(),
+      limit: z.coerce.number().int().min(1).max(50).default(10),
+    })
+    .strict()
+    .refine(rangeIsOrdered, rangeError),
+};
+
+export const codReportSchema = {
+  query: z
+    .object({
+      date: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+        .refine((v) => parseDateBoundary(v, 'start') !== null, { message: 'Not a real date' }),
+    })
+    .strict(),
+};
 ```
 
 ### `src/validations/review.validation.js`
@@ -1501,15 +1802,93 @@ export const listReviewsSchema = {
   params: z.object({ id: objectIdSchema }).strict(),
   query: pageQuerySchema,
 };
+
+export const adminListReviewsSchema = {
+  query: pageQuerySchema.extend({
+    productId: objectIdSchema.optional(),
+    rating: z.coerce.number().int().min(1).max(5).optional(),
+  }),
+};
+
+export const reviewIdParamSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+};
+```
+
+### `src/validations/rider.validation.js`
+
+```js
+import { z } from 'zod';
+import { boolParam, mobileSchema, objectIdSchema, pageQuerySchema, paiseSchema } from '../utils/zodHelpers.js';
+
+const ORDER_STATUSES = ['placed', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
+
+// ---- admin: manage riders
+export const adminListRidersSchema = {
+  query: pageQuerySchema.extend({
+    q: z.string().trim().min(1).max(40).optional(), // name or mobile
+    isActive: boolParam.optional(),
+  }),
+};
+
+export const createRiderSchema = {
+  body: z
+    .object({
+      name: z.string().trim().min(1).max(80),
+      mobile: mobileSchema,
+      isActive: z.boolean().default(true),
+    })
+    .strict(),
+};
+
+export const updateRiderSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+  body: z
+    .object({
+      name: z.string().trim().min(1).max(80).optional(),
+      mobile: mobileSchema.optional(),
+      isActive: z.boolean().optional(),
+    })
+    .strict()
+    .refine((v) => Object.keys(v).length > 0, { message: 'Send at least one field to change' }),
+};
+
+// ---- rider app
+export const riderOrdersSchema = {
+  query: pageQuerySchema.extend({ status: z.enum(ORDER_STATUSES).optional() }),
+};
+
+export const riderOrderIdSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+};
+
+export const deliverOrderSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+  body: z
+    .object({
+      // A STRING on purpose: as a number "0042" would lose its leading zeros.
+      otp: z.string().trim().regex(/^\d{4}$/, 'The delivery OTP is 4 digits'),
+      cashCollected: paiseSchema.optional(), // paise; required for unpaid COD orders
+    })
+    .strict(),
+};
 ```
 
 ### `src/validations/settings.validation.js`
 
 ```js
 import { z } from 'zod';
-import { paiseSchema } from '../utils/zodHelpers.js';
+import { paiseSchema, pincodeSchema } from '../utils/zodHelpers.js';
 
 const hhmm = z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use 24h HH:mm, e.g. 08:00');
+
+// Every store-info field may be cleared with "". Format checks apply only to non-empty values.
+const blankOr = (schema) => schema.or(z.literal(''));
+const phone = blankOr(z.string().trim().regex(/^\+?\d[\d\s-]{5,17}\d$/, 'Enter a valid phone number'));
+const gstin = blankOr(
+  z.string().trim().toUpperCase().regex(/^[0-3]\d[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, 'Enter a valid 15-character GSTIN')
+);
+const fssai = blankOr(z.string().trim().regex(/^\d{14}$/, 'FSSAI licence number is 14 digits'));
 
 export const updateSettingsSchema = {
   body: z
@@ -1520,6 +1899,21 @@ export const updateSettingsSchema = {
       minOrderValue: paiseSchema.optional(),
       storeOpen: z.boolean().optional(),
       storeTimings: z.object({ open: hhmm.optional(), close: hhmm.optional() }).strict().optional(),
+      storeName: z.string().trim().min(1).max(100).optional(),
+      phone: phone.optional(),
+      whatsapp: phone.optional(),
+      email: blankOr(z.string().trim().toLowerCase().email().max(120)).optional(),
+      address: z
+        .object({
+          line1: z.string().trim().max(200).optional(),
+          city: z.string().trim().max(80).optional(),
+          state: z.string().trim().max(80).optional(),
+          pincode: blankOr(pincodeSchema).optional(),
+        })
+        .strict()
+        .optional(),
+      fssaiNumber: fssai.optional(),
+      gstin: gstin.optional(),
     })
     .strict()
     .refine((v) => Object.keys(v).length > 0, { message: 'Send at least one setting to change' }),
@@ -1559,6 +1953,10 @@ export const authenticate = catchAsync(async (req, res, next) => {
   const user = await User.findById(payload.sub);
   if (!user) {
     throw ApiError.unauthorized(ErrorCodes.TOKEN_INVALID, 'User no longer exists');
+  }
+
+  if (user.isActive === false) {
+    throw ApiError.forbidden(ErrorCodes.ACCOUNT_DISABLED, 'This account has been deactivated');
   }
 
   req.user = { id: user.id, mobile: user.mobile, role: user.role };
@@ -1647,6 +2045,19 @@ RAZORPAY_WEBHOOK_SECRET=change_this_webhook_secret
 DEFAULT_DELIVERY_FEE_PAISE=2500
 FREE_DELIVERY_THRESHOLD_PAISE=19900
 DEFAULT_HANDLING_FEE_PAISE=500
+
+# ---- Web Push (PWA order notifications) ----
+# Generate once with `npm run vapid:generate`. The public key is served at GET /push/vapid-public-key.
+# Without these, push is disabled (endpoints answer 503 PUSH_NOT_CONFIGURED) and nothing else is affected.
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:admin@aalimarket.in
+# Extra push-service hostnames to accept (comma separated). Browser vendors' services are built in.
+PUSH_EXTRA_ALLOWED_HOSTS=
+
+# ---- Delivery OTP ----
+# Wrong OTP attempts a rider gets per order before it locks (the OTP is only 4 digits).
+DELIVERY_OTP_MAX_ATTEMPTS=5
 
 # ---- Dashboard / admin ----
 # "Today" in GET /admin/stats and the from/to order filters. 330 = IST (UTC+5:30).
@@ -1750,6 +2161,19 @@ export const env = {
     freeDeliveryThresholdPaise: toInt(process.env.FREE_DELIVERY_THRESHOLD_PAISE, 19900),
     handlingFeePaise: toInt(process.env.DEFAULT_HANDLING_FEE_PAISE, 500),
   },
+
+  // Web Push (VAPID). Generate once with `npm run vapid:generate`. Without them push is simply disabled.
+  push: {
+    publicKey: process.env.VAPID_PUBLIC_KEY || '',
+    privateKey: process.env.VAPID_PRIVATE_KEY || '',
+    subject: process.env.VAPID_SUBJECT || 'mailto:admin@aalimarket.in',
+    // Push-service hostnames (suffix match) accepted for subscriptions, in addition to the built-in list of
+    // the browser vendors' services. Subscriptions are rejected otherwise (the server POSTs to that URL).
+    extraAllowedHosts: (process.env.PUSH_EXTRA_ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
+  },
+
+  // A rider gets this many wrong delivery-OTP attempts per order before it locks (4 digits = 10,000 combinations).
+  deliveryOtpMaxAttempts: toInt(process.env.DELIVERY_OTP_MAX_ATTEMPTS, 5),
 
   // "Today" in dashboard stats / date filters. 330 = IST (UTC+5:30, no DST).
   storeUtcOffsetMinutes: toInt(process.env.STORE_UTC_OFFSET_MINUTES, 330),

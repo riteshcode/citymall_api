@@ -171,4 +171,55 @@ export async function removeCoupon(userId) {
   return buildCartView(cart);
 }
 
+/**
+ * "Buy again": adds the items of a past order to the user's cart at TODAY's prices (the cart view always
+ * re-reads live prices) and never beyond today's stock. Anything that couldn't be added in full is reported:
+ *   inactive      - the product no longer exists / was switched off
+ *   out_of_stock  - no stock left (or the cart already holds all of it)
+ *   qty_reduced   - some stock, but less than the order had; `added` says how many went in
+ * @returns {Promise<{ cart: object, skipped: object[] }>}
+ */
+export async function reorder(userId, order) {
+  const cart = await getOrCreateCart(userId);
+  const products = await Product.find({ _id: { $in: order.items.map((i) => i.product) } });
+  const productMap = new Map(products.map((p) => [p.id, p]));
+  const skipped = [];
+
+  for (const item of order.items) {
+    const productId = item.product.toString();
+    const product = productMap.get(productId);
+    const entry = (reason, added) => ({
+      productId,
+      title: { en: item.title.en, hi: item.title.hi },
+      reason,
+      requested: item.qty,
+      added,
+    });
+
+    if (!product || !product.isActive) {
+      skipped.push(entry('inactive', 0));
+      continue;
+    }
+
+    const line = cart.items.find((i) => i.product.toString() === productId);
+    const room = product.stock - (line ? line.qty : 0);
+    if (room <= 0) {
+      skipped.push(entry('out_of_stock', 0));
+      continue;
+    }
+
+    const add = Math.min(item.qty, room);
+    if (line) {
+      line.qty += add;
+      line.priceAtAdd = product.price;
+    } else {
+      cart.items.push({ product: product._id, qty: add, priceAtAdd: product.price });
+    }
+    if (add < item.qty) skipped.push(entry('qty_reduced', add));
+  }
+
+  await cart.save();
+  return { cart: await buildCartView(cart), skipped };
+}
+
 export { getOrCreateCart, buildCartView };

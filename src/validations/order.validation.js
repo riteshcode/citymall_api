@@ -7,6 +7,7 @@ export const createOrderSchema = {
     .object({
       addressId: objectIdSchema,
       paymentMethod: z.enum(['cod', 'upi', 'card', 'netbanking']),
+      deliveryNote: z.string().trim().max(200).optional(),
     })
     .strict(),
 };
@@ -53,6 +54,30 @@ export const updateOrderStatusSchema = {
     .object({
       status: z.enum(['placed', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled']),
       note: z.string().trim().max(300).optional(),
+    })
+    .strict(),
+};
+
+// Online payment retry / switch to COD / reorder: the order id is the only input.
+export const retryPaymentSchema = { params: z.object({ id: objectIdSchema }).strict() };
+export const reorderSchema = { params: z.object({ id: objectIdSchema }).strict() };
+
+export const changePaymentMethodSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+  body: z.object({ paymentMethod: z.literal('cod') }).strict(),
+};
+
+export const assignRiderSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+  // riderId: null unassigns
+  body: z.object({ riderId: objectIdSchema.nullable() }).strict(),
+};
+
+export const latestOrdersSchema = {
+  query: z
+    .object({
+      // ISO datetime WITH a zone (e.g. 2026-11-18T10:30:00.000Z or ...+05:30) — what Date#toISOString() gives
+      since: z.string().datetime({ offset: true }).transform((v) => new Date(v)),
     })
     .strict(),
 };

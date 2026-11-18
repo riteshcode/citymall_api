@@ -4,6 +4,7 @@ import { logger } from '../config/logger.js';
 import { Order } from '../models/Order.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
+import { notifyOrderStatusChange } from './push.service.js';
 
 /**
  * PaymentProvider interface every provider implements:
@@ -117,10 +118,11 @@ export async function markOrderPaid(orderId, paymentId, note) {
   );
   if (!updated) return false;
 
-  await Order.updateOne(
+  const confirmed = await Order.updateOne(
     { _id: orderId, status: 'placed' },
     { $set: { status: 'confirmed' }, $push: { statusHistory: { status: 'confirmed', at: new Date(), note } } }
   );
+  if (confirmed.modifiedCount === 1) notifyOrderStatusChange(await Order.findById(orderId));
   return true;
 }
 
@@ -159,4 +161,72 @@ export async function verifyOrderPayment(userId, { orderId, paymentId, signature
 
   await markOrderPaid(order._id, paymentId, 'Payment verified');
   return Order.findById(order._id);
+}
+
+// ---------------------------------------------------------------- retry / switch to COD
+
+const ONLINE_METHODS = ['upi', 'card', 'netbanking'];
+
+// The one definition of "this order's online payment can still be (re)attempted".
+const payableFilter = (orderId, userId) => ({
+  _id: orderId,
+  user: userId,
+  paymentMethod: { $in: ONLINE_METHODS },
+  paymentStatus: { $in: ['pending', 'failed'] },
+  status: { $ne: 'cancelled' },
+});
+
+/** Gateway orders replaced by a retry are remembered so a late webhook for the abandoned attempt still matches. */
+const archiveCurrentProviderOrder = (order) =>
+  order.paymentProviderOrderId ? { $push: { previousProviderOrderIds: order.paymentProviderOrderId } } : {};
+
+/**
+ * "Pay again" after a failed / abandoned online payment: creates a fresh gateway order for the same amount.
+ * @returns {Promise<object>} the `payment` block (same shape as POST /orders returns)
+ */
+export async function retryOrderPayment(userId, orderId) {
+  const order = await Order.findOne(payableFilter(orderId, userId));
+  if (!order) {
+    // Distinguish "not yours / doesn't exist" (404) from "exists but not retryable" (400).
+    if (!(await Order.exists({ _id: orderId, user: userId }))) throw ApiError.notFound(ErrorCodes.ORDER_NOT_FOUND, 'Order not found');
+    throw ApiError.badRequest(
+      ErrorCodes.PAYMENT_NOT_RETRYABLE,
+      'Only an unpaid online-payment order that is not cancelled can be paid again'
+    );
+  }
+
+  const providerOrder = await getPaymentProvider().createOrder({ amountPaise: order.pricing.total, receipt: order.orderNumber });
+
+  // Swap atomically, and only if the order is STILL retryable (a webhook may have marked it paid meanwhile).
+  const updated = await Order.findOneAndUpdate(
+    payableFilter(orderId, userId),
+    { $set: { paymentProviderOrderId: providerOrder.id, paymentStatus: 'pending' }, ...archiveCurrentProviderOrder(order) },
+    { new: true }
+  );
+  if (!updated) {
+    throw ApiError.badRequest(ErrorCodes.PAYMENT_NOT_RETRYABLE, 'This order\'s payment status just changed');
+  }
+  return buildPaymentInfo(updated);
+}
+
+/** Online payment keeps failing -> the customer pays cash on delivery instead. Only while unpaid and not cancelled. */
+export async function switchOrderToCod(userId, orderId) {
+  const order = await Order.findOne(payableFilter(orderId, userId));
+  if (!order) {
+    if (!(await Order.exists({ _id: orderId, user: userId }))) throw ApiError.notFound(ErrorCodes.ORDER_NOT_FOUND, 'Order not found');
+    throw ApiError.badRequest(
+      ErrorCodes.PAYMENT_METHOD_NOT_CHANGEABLE,
+      'Payment method can only be changed on an unpaid online-payment order that is not cancelled'
+    );
+  }
+
+  const updated = await Order.findOneAndUpdate(
+    payableFilter(orderId, userId),
+    { $set: { paymentMethod: 'cod', paymentStatus: 'pending', paymentProviderOrderId: null }, ...archiveCurrentProviderOrder(order) },
+    { new: true }
+  );
+  if (!updated) {
+    throw ApiError.badRequest(ErrorCodes.PAYMENT_METHOD_NOT_CHANGEABLE, 'This order\'s payment status just changed');
+  }
+  return updated;
 }

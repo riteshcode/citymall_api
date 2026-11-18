@@ -55,6 +55,8 @@ See [`.env.example`](.env.example) for the full list with defaults. Key groups:
 | Database | `MONGO_URI` |
 | JWT | access/refresh secrets + expiry |
 | OTP | length, TTL, max attempts, send rate limit, `SMS_PROVIDER` |
+| Push | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (generate with `npm run vapid:generate`), `PUSH_EXTRA_ALLOWED_HOSTS`. Without keys push is disabled and nothing else is affected |
+| Delivery OTP | `DELIVERY_OTP_MAX_ATTEMPTS` (default 5 wrong guesses per order) |
 | Storage | `STORAGE_PROVIDER` (`cloudinary` default \| `s3`), `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` (S3_* only if `s3`). The server boots without them; uploads then fail with `UPLOAD_FAILED` |
 | Payments | `PAYMENT_PROVIDER` (`mock` or `razorpay`-shaped), webhook secret |
 | Pricing | default delivery fee, free-delivery threshold, handling fee (all in paise) |
@@ -138,7 +140,7 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | DELETE | `/addresses/:id` 🔒 | Delete address |
 | POST | `/addresses/:id/default` 🔒 | Set as default |
 | GET | `/serviceability?pincode=` | Serviceability from the admin-managed pincode list → `{ pincode, serviceable, etaDays, areaName, deliveryFee }` |
-| GET | `/settings` | Public store settings: `deliveryFee`, `freeDeliveryThreshold`, `handlingFee`, `minOrderValue`, `storeOpen`, `storeTimings` (paise) — for "add ₹X more for free delivery" |
+| GET | `/settings` | Public store settings **and store info** (`storeName`, `phone`, `whatsapp`, `email`, `address`, `fssaiNumber`, `gstin` — for legal pages / invoices / contact): `deliveryFee`, `freeDeliveryThreshold`, `handlingFee`, `minOrderValue`, `storeOpen`, `storeTimings` (paise) — for "add ₹X more for free delivery" |
 
 ### Checkout & Orders
 
@@ -148,6 +150,9 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | GET | `/orders` 🔒 | List current user's orders (paginated) |
 | GET | `/orders/:id` 🔒 | Order detail with `statusHistory` for tracking |
 | POST | `/orders/:id/cancel` 🔒 | Cancel (only while `placed`/`confirmed`/`packed`); restores stock |
+| POST | `/orders/:id/payment` 🔒 | **Pay again** after a failed/abandoned online payment → `{ payment: { provider, keyId, providerOrderId, amount, currency } }` (fresh gateway order). `400 PAYMENT_NOT_RETRYABLE` unless it's your unpaid, non-cancelled upi/card/netbanking order |
+| PATCH | `/orders/:id/payment-method` 🔒 | `{ paymentMethod: "cod" }` — give up on online payment and pay cash on delivery (only while pending/failed). `400 PAYMENT_METHOD_NOT_CHANGEABLE` otherwise |
+| POST | `/orders/:id/reorder` 🔒 | **Buy again**: adds the order's items to your cart at today's prices, capped by stock → `{ cart, skipped: [{ productId, title, reason: inactive \| out_of_stock \| qty_reduced, requested, added }] }` |
 | POST | `/payments/verify` 🔒 | After Razorpay checkout succeeds: `{ orderId, razorpay_payment_id, razorpay_signature }` → signature verified, `paymentStatus = paid` |
 | POST | `/payments/webhook` | Razorpay payment webhook (raw body, HMAC signature verified) |
 
@@ -169,11 +174,43 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | GET/PATCH | `/admin/settings` | Delivery fee, free-delivery threshold, handling fee, min order value, store open/closed, timings |
 | GET/POST/PATCH/DELETE | `/admin/pincodes`, `/admin/pincodes/:id` | Serviceable areas `{ pincode, areaName{en,hi}, isActive, deliveryFee?, etaDays }` (DELETE = hard) |
 | POST | `/admin/uploads` | Upload images (multipart field `images`, max 6, 5 MB each, jpeg/png/webp/avif) → `201 { data: { urls: ["https://res.cloudinary.com/..."] } }` |
+| GET | `/admin/orders/latest?since=<ISO datetime>` | New-order alert for polling: `{ count, orders: [{ id, orderNumber, total, createdAt }] }` (newest 10; `since` is exclusive, needs a zone) |
+| PATCH | `/admin/orders/:id/assign` | `{ riderId }` (or `null` to unassign) → order with `rider { id, name, mobile }`. The order never exposes `deliveryOtp` here |
+| GET/POST | `/admin/riders` | List / create delivery riders `{ name, mobile, isActive }` (`activeOrders` count included). Riders sign in with the normal OTP flow |
+| PATCH | `/admin/riders/:id` | Change `name`, `mobile`, `isActive` (inactive = cannot log in, tokens stop working) |
+| GET | `/admin/reports/sales?from&to&groupBy=day\|week\|month` | `[{ period, orders, revenue, avgOrderValue }]` (IST periods; week = Monday date; default last 30 days) |
+| GET | `/admin/reports/top-products?from&to&limit=10` | `[{ productId, title, qtySold, revenue }]` |
+| GET | `/admin/reports/cod?date=YYYY-MM-DD` | Cash reconciliation: `{ totalExpected, totalCollected, byRider: [{ rider, orders, expected, collected }] }` |
+| PATCH | `/admin/products/bulk` | Body `[{ id, price?, mrp?, stock?, isActive? }]` (max 200) → `{ updated, failed: [{ id, error }] }`; `price <= mrp` checked per row |
+| GET | `/admin/products/export` | All products as CSV (`id, slug, title_en, title_hi, category_slug, brand, unit, mrp, price, stock, isActive`; money in paise; UTF-8 BOM for Excel) |
+| POST | `/admin/products/import?dryRun=true\|false` | Multipart field `file` (.csv, ≤ 2 MB, ≤ 2000 rows) → `{ created, updated, errors: [{ row, error }], dryRun }` |
+| GET | `/admin/reviews?page&limit&productId&rating` | Reviews with `user { name, mobile }` and `product { title, slug }` |
+| DELETE | `/admin/reviews/:id` | Removes the review and recalculates the product's `ratingAvg` / `ratingCount` |
+
+### Rider app (`role: rider`)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/rider/orders?status=&page&limit` | Only the orders assigned to me (customer name/mobile, address with optional `location {lat,lng}`, `deliveryNote`, payment info; never the OTP) |
+| PATCH | `/rider/orders/:id/out-for-delivery` | From confirmed / packed / shipped |
+| POST | `/rider/orders/:id/deliver` | `{ otp: "1234", cashCollected: <paise> }` — OTP is a **string**. Wrong OTP → `400 INVALID_DELIVERY_OTP` (with `attemptsLeft`); after 5 wrong tries `429 DELIVERY_OTP_LOCKED` (an admin can still close the order). Unpaid COD requires `cashCollected` and becomes `paid` |
+
+### Push notifications (PWA)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/push/vapid-public-key` | Public key for `pushManager.subscribe()` (`503 PUSH_NOT_CONFIGURED` without keys) |
+| POST | `/me/push-subscriptions` 🔒 | The browser's `PushSubscription` JSON (`endpoint`, `expirationTime`, `keys {p256dh, auth}`). Only browser vendors' push services are accepted (SSRF guard); max 10 devices per user |
+| DELETE | `/me/push-subscriptions` 🔒 | `{ endpoint }` |
+
+On an order status change (admin, rider, confirmed payment) every device of the customer gets `{ title, body, url: "/orders/<id>" }` (English + Hindi). A `404`/`410` from the push service deletes that subscription. Failures never affect the API call.
 
 #### Store settings & serviceable areas — behaviour worth knowing
 
 - **Settings** live in one DB document (created from the `DEFAULT_*` env values on first read). Cart totals and checkout read it on every request, so changes apply immediately. `storeOpen = false` → `POST /orders` returns `503 STORE_CLOSED` (retries of an already-placed order via the same `Idempotency-Key` still succeed). `minOrderValue` is checked against the pre-discount subtotal (`400 MIN_ORDER_VALUE`). `storeTimings` is display-only.
 - **Pincodes**: with **no** pincode documents the API serves every pincode (so a fresh install works); as soon as one exists, only active listed pincodes are serviceable and checkout rejects others with `400 NOT_SERVICEABLE`. A pincode's `deliveryFee` replaces the store delivery fee for that area (the free-delivery threshold still applies); `etaDays` drives `expectedDeliveryAt`. `npm run seed` adds three sample areas — delete or edit them to match your real coverage.
+- **Store info** (`storeName`, `phone`, `whatsapp`, `email`, `address {line1, city, state, pincode}`, `fssaiNumber` (14 digits), `gstin` (15 chars, upper-cased)) is public via `GET /settings` and edited with `PATCH /admin/settings`; nested `address` merges field by field and any value can be cleared with `""`.
+- **Delivery OTP**: every order gets a random 4-digit code, visible only to the customer who owns it (`GET /orders/:id`, `POST /orders` response) — never in admin or rider responses or in push messages.
 - **Online payments**: set `PAYMENT_PROVIDER=razorpay` plus `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`. Orders paid online call the real Razorpay Orders API. The `mock` provider only verifies outside production. Flow: `POST /orders` → open Razorpay checkout with `payment.keyId` + `payment.providerOrderId` → `POST /payments/verify` with the three values Razorpay returns (the webhook confirms independently; whichever lands first wins, both are idempotent).
 
 ### Wishlist (bonus — simple, per the data model)
@@ -188,7 +225,7 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 
 Every error response is `{ success: false, data: null, error: { code, message, details? } }`. Stable codes (non-exhaustive — see `src/utils/errorCodes.js` for the full list) so the client can render the right bilingual copy:
 
-`OTP_EXPIRED`, `OTP_INVALID`, `OTP_MAX_ATTEMPTS`, `OTP_SEND_RATE_LIMITED`, `TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, `VALIDATION_ERROR`, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `COUPON_NOT_FOUND`, `COUPON_EXPIRED`, `COUPON_MIN_ORDER`, `COUPON_USAGE_LIMIT_REACHED`, `COUPON_PER_USER_LIMIT_REACHED`, `ADDRESS_NOT_FOUND`, `ORDER_NOT_FOUND`, `ORDER_NOT_CANCELLABLE`, `IDEMPOTENCY_KEY_REQUIRED`, `REVIEW_REQUIRES_DELIVERED_ORDER`, `REVIEW_ALREADY_EXISTS`, `PAYMENT_SIGNATURE_INVALID`, `FORBIDDEN`, `RATE_LIMITED`, `STORE_CLOSED`, `MIN_ORDER_VALUE`, `NOT_SERVICEABLE`, `PINCODE_NOT_FOUND`, `PAYMENT_NOT_REQUIRED`, `ORDER_NOT_PAYABLE`, `PAYMENT_PROVIDER_ERROR`.
+`OTP_EXPIRED`, `OTP_INVALID`, `OTP_MAX_ATTEMPTS`, `OTP_SEND_RATE_LIMITED`, `TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, `VALIDATION_ERROR`, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `COUPON_NOT_FOUND`, `COUPON_EXPIRED`, `COUPON_MIN_ORDER`, `COUPON_USAGE_LIMIT_REACHED`, `COUPON_PER_USER_LIMIT_REACHED`, `ADDRESS_NOT_FOUND`, `ORDER_NOT_FOUND`, `ORDER_NOT_CANCELLABLE`, `IDEMPOTENCY_KEY_REQUIRED`, `REVIEW_REQUIRES_DELIVERED_ORDER`, `REVIEW_ALREADY_EXISTS`, `PAYMENT_SIGNATURE_INVALID`, `FORBIDDEN`, `RATE_LIMITED`, `STORE_CLOSED`, `MIN_ORDER_VALUE`, `NOT_SERVICEABLE`, `PINCODE_NOT_FOUND`, `PAYMENT_NOT_REQUIRED`, `ORDER_NOT_PAYABLE`, `PAYMENT_PROVIDER_ERROR`, `PAYMENT_NOT_RETRYABLE`, `PAYMENT_METHOD_NOT_CHANGEABLE`, `INVALID_DELIVERY_OTP`, `DELIVERY_OTP_LOCKED`, `INVALID_ORDER_STATE`, `ORDER_NOT_ASSIGNABLE`, `RIDER_NOT_FOUND`, `MOBILE_ALREADY_REGISTERED`, `ACCOUNT_DISABLED`, `REVIEW_NOT_FOUND`, `PUSH_NOT_CONFIGURED`, `UPLOAD_FAILED`, `FILE_TOO_LARGE`.
 
 ## API spec
 

@@ -28,6 +28,10 @@ export const authenticate = catchAsync(async (req, res, next) => {
     throw ApiError.unauthorized(ErrorCodes.TOKEN_INVALID, 'User no longer exists');
   }
 
+  if (user.isActive === false) {
+    throw ApiError.forbidden(ErrorCodes.ACCOUNT_DISABLED, 'This account has been deactivated');
+  }
+
   req.user = { id: user.id, mobile: user.mobile, role: user.role };
   req.userDoc = user;
   next();

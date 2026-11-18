@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "9f2b6f1a-2b3a-4c1d-9e3a-aali-market-api",
     "name": "Aali Market API",
-    "description": "Price-first mobile shopping API for small-town India. All money is integer paise. Bilingual fields are { en, hi }. Every response is { success, data, error }.\n\nFlow to try this collection end to end:\n1. Auth > Send OTP, check the server console for the printed code (SMS_PROVIDER=console in dev), then Auth > Verify OTP (auto-saves accessToken/refreshToken).\n2. Catalog > List Categories / List Products (auto-saves categoryId/productId/productSlug).\n3. Cart > Add Item, Apply Coupon (code AALI50, needs subtotal >= ₹199).\n4. Addresses > Create Address (auto-saves addressId).\n5. Orders > Create Order (auto-saves orderId) — Idempotency-Key header uses the {{$guid}} dynamic variable, so re-sending the exact same request body+key replays the same order.\n6. Admin folder uses its own adminAccessToken — Send/Verify OTP with the seeded admin mobile (9999999999 by default).\n\nNew in this version: Catalog > Suggest Products / Store Settings, Orders > Create Order (UPI), Payments > Verify Payment, and Admin > Dashboard, Orders, Settings, Pincodes, plus inactive-inclusive product/category/banner lists.",
+    "description": "Price-first mobile shopping API for small-town India. All money is integer paise. Bilingual fields are { en, hi }. Every response is { success, data, error }.\n\nFlow to try this collection end to end:\n1. Auth > Send OTP, check the server console for the printed code (SMS_PROVIDER=console in dev), then Auth > Verify OTP (auto-saves accessToken/refreshToken).\n2. Catalog > List Categories / List Products (auto-saves categoryId/productId/productSlug).\n3. Cart > Add Item, Apply Coupon (code AALI50, needs subtotal >= ₹199).\n4. Addresses > Create Address (auto-saves addressId).\n5. Orders > Create Order (auto-saves orderId) — Idempotency-Key header uses the {{$guid}} dynamic variable, so re-sending the exact same request body+key replays the same order.\n6. Admin folder uses its own adminAccessToken — Send/Verify OTP with the seeded admin mobile (9999999999 by default).\n\nNew in this version: Catalog > Suggest Products / Store Settings, Orders > Create Order (UPI), Payments > Verify Payment, and Admin > Dashboard, Orders, Settings, Pincodes, plus inactive-inclusive product/category/banner lists.\n\nAlso in this version: Orders > Pay Again / Switch Payment to COD / Reorder, Push (PWA), Rider (login + deliver with OTP), and Admin > Riders, Reports, Reviews, bulk/CSV product tools, Assign Rider, Latest Orders, Update Store Info.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -123,6 +123,41 @@
     },
     {
       "key": "createdPincodeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "riderMobile",
+      "value": "9877700001",
+      "type": "string"
+    },
+    {
+      "key": "riderOtpCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "riderAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "riderRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "riderId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reviewId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "deliveryOtp",
       "value": "",
       "type": "string"
     }
@@ -942,7 +977,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"label\":\"Home\",\"line1\":\"123 MG Road\",\"line2\":\"Near Bus Stand\",\"landmark\":\"Opposite Petrol Pump\",\"city\":\"Sitapur\",\"state\":\"Uttar Pradesh\",\"pincode\":\"261001\",\"isDefault\":true}",
+              "raw": "{\"label\":\"Home\",\"line1\":\"123 MG Road\",\"line2\":\"Near Bus Stand\",\"landmark\":\"Opposite Petrol Pump\",\"city\":\"Sitapur\",\"state\":\"Uttar Pradesh\",\"pincode\":\"261001\",\"isDefault\":true,\"location\":{\"lat\":27.5706,\"lng\":80.6822}}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -957,7 +992,8 @@
               "path": [
                 "addresses"
               ]
-            }
+            },
+            "description": "location {lat, lng} is optional (both values or none) — it helps the rider find the house and is copied into the order's shippingAddress. On PATCH, send \"location\": null to clear it."
           }
         },
         {
@@ -1089,6 +1125,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "if (pm.response.code === 201) {",
+                  "  if (pm.response.json().data.deliveryOtp) { pm.collectionVariables.set('deliveryOtp', pm.response.json().data.deliveryOtp); }",
                   "  var json = pm.response.json();",
                   "  pm.collectionVariables.set('orderId', json.data.id);",
                   "  console.log('Order created:', json.data.orderNumber);",
@@ -1121,7 +1158,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"addressId\":\"{{addressId}}\",\"paymentMethod\":\"cod\"}",
+              "raw": "{\"addressId\":\"{{addressId}}\",\"paymentMethod\":\"cod\",\"deliveryNote\":\"Ring the bell twice, leave with the guard\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1137,7 +1174,7 @@
                 "orders"
               ]
             },
-            "description": "paymentMethod: cod | upi | card | netbanking. Re-validates stock/price/coupon and decrements stock inside a transaction."
+            "description": "paymentMethod: cod | upi | card | netbanking. Re-validates stock/price/coupon and decrements stock inside a transaction.\n\ndeliveryNote (optional, max 200 chars) is shown to the rider. The response includes `deliveryOtp` — the 4-digit code the customer reads out to the rider (saved to {{deliveryOtp}} by the test script)."
           }
         },
         {
@@ -1165,7 +1202,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"addressId\":\"{{addressId}}\",\"paymentMethod\":\"upi\"}",
+              "raw": "{\"addressId\":\"{{addressId}}\",\"paymentMethod\":\"upi\",\"deliveryNote\":\"Ring the bell twice, leave with the guard\"}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1181,7 +1218,7 @@
                 }
               ]
             },
-            "description": "Response includes data.payment = { provider, keyId, providerOrderId, amount, currency }. Open Razorpay checkout with keyId + providerOrderId, then call Payments > Verify Payment. Can also fail with STORE_CLOSED (503), MIN_ORDER_VALUE, NOT_SERVICEABLE."
+            "description": "Response includes data.payment = { provider, keyId, providerOrderId, amount, currency }. Open Razorpay checkout with keyId + providerOrderId, then call Payments > Verify Payment. Can also fail with STORE_CLOSED (503), MIN_ORDER_VALUE, NOT_SERVICEABLE.\n\ndeliveryNote (optional, max 200 chars) is shown to the rider. The response includes `deliveryOtp` — the 4-digit code the customer reads out to the rider (saved to {{deliveryOtp}} by the test script)."
           },
           "event": [
             {
@@ -1190,6 +1227,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "if (pm.response.code === 201) {",
+                  "  if (pm.response.json().data.deliveryOtp) { pm.collectionVariables.set('deliveryOtp', pm.response.json().data.deliveryOtp); }",
                   "  var d = pm.response.json().data;",
                   "  pm.collectionVariables.set('orderId', d.id);",
                   "  if (d.payment) {",
@@ -1304,6 +1342,115 @@
               ]
             },
             "description": "Only while status is placed/confirmed/packed — otherwise ORDER_NOT_CANCELLABLE."
+          }
+        },
+        {
+          "name": "Pay Again (retry online payment)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/payment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "payment"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "For an unpaid, non-cancelled upi/card/netbanking order. Returns { payment: { provider, keyId, providerOrderId, amount, currency } } for a FRESH gateway order. 400 PAYMENT_NOT_RETRYABLE otherwise."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) { pm.collectionVariables.set('paymentProviderOrderId', pm.response.json().data.payment.providerOrderId); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Switch Payment to COD",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/payment-method",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "payment-method"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"paymentMethod\":\"cod\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "Only while the online payment is pending/failed. 400 PAYMENT_METHOD_NOT_CHANGEABLE otherwise."
+          }
+        },
+        {
+          "name": "Reorder (Buy Again)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/{{orderId}}/reorder",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "{{orderId}}",
+                "reorder"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "Adds the order's items to your cart at today's prices, capped by stock. Response: { cart, skipped: [{ productId, title, reason: inactive | out_of_stock | qty_reduced, requested, added }] }."
           }
         }
       ]
@@ -1736,6 +1883,158 @@
                   ]
                 },
                 "description": "Soft-delete: sets isActive=false."
+              }
+            },
+            {
+              "name": "Bulk Update",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/products/bulk",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "products",
+                    "bulk"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "[{\"id\":\"{{productId}}\",\"price\":2000,\"stock\":90},{\"id\":\"{{categoryId}}\",\"isActive\":false}]",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Max 200 rows: [{ id, price?, mrp?, stock?, isActive? }]. Each row is validated on its own (price <= mrp against the final values); response { updated, failed: [{ id, error }] }."
+              }
+            },
+            {
+              "name": "Export CSV",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/products/export",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "products",
+                    "export"
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "All products incl. inactive. Columns: id, slug, title_en, title_hi, category_slug, brand, unit, mrp, price, stock, isActive. Money in PAISE. UTF-8 with BOM (Excel-friendly). Use Send and Download."
+              }
+            },
+            {
+              "name": "Import CSV (dry run)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/products/import?dryRun=true",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "products",
+                    "import"
+                  ],
+                  "query": [
+                    {
+                      "key": "dryRun",
+                      "value": "true"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Multipart field \"file\" (.csv, max 2 MB, max 2000 rows) in the export format. A row with an id updates that product; otherwise the slug decides. On updates blank cells = unchanged. dryRun=true validates and counts, writes nothing. Response { created, updated, errors: [{ row, error }], dryRun } (header = row 1)."
+              }
+            },
+            {
+              "name": "Import CSV (apply)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/products/import",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "products",
+                    "import"
+                  ]
+                },
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Same as the dry run but writes the valid rows."
               }
             }
           ]
@@ -2451,6 +2750,83 @@
                 },
                 "description": "status: placed | confirmed | packed | shipped | out_for_delivery | delivered | cancelled"
               }
+            },
+            {
+              "name": "Assign Rider",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/orders/{{orderId}}/assign",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "orders",
+                    "{{orderId}}",
+                    "assign"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"riderId\":\"{{riderId}}\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "riderId null unassigns. 400 ORDER_NOT_ASSIGNABLE for delivered/cancelled orders or an inactive rider. The response never contains deliveryOtp."
+              }
+            },
+            {
+              "name": "Latest Orders (new-order alert)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/orders/latest?since={{$isoTimestamp}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "orders",
+                    "latest"
+                  ],
+                  "query": [
+                    {
+                      "key": "since",
+                      "value": "{{$isoTimestamp}}"
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Poll every few seconds with the newest createdAt you have seen (exclusive). → { count, orders: [{ id, orderNumber, total, createdAt }] } (newest 10). since must be an ISO datetime with a zone."
+              }
             }
           ]
         },
@@ -2522,6 +2898,47 @@
                   ]
                 },
                 "description": "All money in paise; send only the fields you want to change. storeOpen=false makes POST /orders return 503 STORE_CLOSED. freeDeliveryThreshold 0 = delivery always free."
+              }
+            },
+            {
+              "name": "Update Store Info",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/settings",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "settings"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"storeName\":\"Aali Market, Sitapur\",\"phone\":\"+91 98765 43210\",\"whatsapp\":\"9876543210\",\"email\":\"hello@aalimarket.in\",\"address\":{\"line1\":\"12 Station Road\",\"city\":\"Sitapur\",\"state\":\"Uttar Pradesh\",\"pincode\":\"261001\"},\"fssaiNumber\":\"12345678901234\",\"gstin\":\"09AABCU9603R1ZX\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Public via GET /settings (legal pages, invoices, contact). address merges field by field; any value can be cleared with \"\". fssaiNumber = 14 digits, gstin = 15 chars."
               }
             }
           ]
@@ -2697,6 +3114,368 @@
               }
             }
           ]
+        },
+        {
+          "name": "Riders",
+          "item": [
+            {
+              "name": "List Riders",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/riders?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "riders"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "q",
+                      "value": "ram",
+                      "disabled": true
+                    },
+                    {
+                      "key": "isActive",
+                      "value": "true",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Create Rider",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/riders",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "riders"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"name\":\"Ramesh Kumar\",\"mobile\":\"{{riderMobile}}\",\"isActive\":true}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "The rider then logs in through the normal OTP flow. 409 MOBILE_ALREADY_REGISTERED if the mobile belongs to anyone."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) { pm.collectionVariables.set('riderId', pm.response.json().data.id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Update Rider",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/riders/{{riderId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "riders",
+                    "{{riderId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"name\":\"Ramesh Yadav\",\"isActive\":true}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "isActive:false blocks login and stops existing tokens working."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reports",
+          "item": [
+            {
+              "name": "Sales Report",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/reports/sales?groupBy=day",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "reports",
+                    "sales"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-11-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-11-30",
+                      "disabled": true
+                    },
+                    {
+                      "key": "groupBy",
+                      "value": "day"
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "groupBy day | week | month → [{ period, orders, revenue, avgOrderValue }] (paise, IST; cancelled / failed / refunded excluded). Default range: last 30 days."
+              }
+            },
+            {
+              "name": "Top Products",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/reports/top-products?limit=10",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "reports",
+                    "top-products"
+                  ],
+                  "query": [
+                    {
+                      "key": "from",
+                      "value": "2026-11-01",
+                      "disabled": true
+                    },
+                    {
+                      "key": "to",
+                      "value": "2026-11-30",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "10"
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "→ [{ productId, title, qtySold, revenue }]"
+              }
+            },
+            {
+              "name": "COD Reconciliation",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/reports/cod?date=2026-11-18",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "reports",
+                    "cod"
+                  ],
+                  "query": [
+                    {
+                      "key": "date",
+                      "value": "2026-11-18"
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "COD orders delivered that IST day → { totalExpected, totalCollected, byRider: [{ rider, orders, expected, collected }] }. rider null = closed by an admin (no cash figure)."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews",
+          "item": [
+            {
+              "name": "List Reviews",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/reviews?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "reviews"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "productId",
+                      "value": "{{productId}}",
+                      "disabled": true
+                    },
+                    {
+                      "key": "rating",
+                      "value": "1",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var j = pm.response.json(); if (j.data && j.data.length) { pm.collectionVariables.set('reviewId', j.data[0].id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Delete Review",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/reviews/{{reviewId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "reviews",
+                    "{{reviewId}}"
+                  ]
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Also recalculates the product's ratingAvg / ratingCount."
+              }
+            }
+          ]
         }
       ]
     },
@@ -2718,6 +3497,310 @@
               ]
             },
             "description": "Not under API_BASE_PATH — lives at the server root."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Push (PWA)",
+      "item": [
+        {
+          "name": "Get VAPID Public Key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/push/vapid-public-key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "push",
+                "vapid-public-key"
+              ]
+            },
+            "description": "Public. 503 PUSH_NOT_CONFIGURED until VAPID keys are set (npm run vapid:generate)."
+          }
+        },
+        {
+          "name": "Subscribe (PushSubscription JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/push-subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "push-subscriptions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/REPLACE_WITH_REAL_TOKEN\",\"expirationTime\":null,\"keys\":{\"p256dh\":\"BASE64URL_65_BYTE_PUBLIC_KEY\",\"auth\":\"BASE64URL_16_BYTE_SECRET\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "Paste what `JSON.stringify(subscription)` gives in the browser. Only browser vendors' push services are accepted. Max 10 devices per user."
+          }
+        },
+        {
+          "name": "Unsubscribe",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/push-subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "push-subscriptions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/REPLACE_WITH_REAL_TOKEN\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rider",
+      "item": [
+        {
+          "name": "Rider - Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/otp/send",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "otp",
+                "send"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"mobile\":\"{{riderMobile}}\",\"purpose\":\"login\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "The rider must first be created by an admin (Admin > Riders > Create Rider). Same OTP flow as customers."
+          }
+        },
+        {
+          "name": "Rider - Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/otp/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "otp",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"mobile\":\"{{riderMobile}}\",\"code\":\"{{riderOtpCode}}\",\"purpose\":\"login\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Set {{riderOtpCode}} from the server console first. Saves riderAccessToken."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ([200, 201].includes(pm.response.code)) {",
+                  "  var d = pm.response.json().data;",
+                  "  pm.collectionVariables.set('riderAccessToken', d.accessToken);",
+                  "  pm.collectionVariables.set('riderRefreshToken', d.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My Assigned Orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rider/orders?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "confirmed",
+                  "disabled": true
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderAccessToken}}"
+                }
+              ]
+            },
+            "description": "Only orders assigned to me. Includes customer name/mobile, address (+ location), deliveryNote; never the OTP."
+          }
+        },
+        {
+          "name": "Out for Delivery",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/rider/orders/{{orderId}}/out-for-delivery",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "orders",
+                "{{orderId}}",
+                "out-for-delivery"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderAccessToken}}"
+                }
+              ]
+            },
+            "description": "From confirmed / packed / shipped."
+          }
+        },
+        {
+          "name": "Deliver (OTP + cash)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rider/orders/{{orderId}}/deliver",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rider",
+                "orders",
+                "{{orderId}}",
+                "deliver"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"otp\":\"{{deliveryOtp}}\",\"cashCollected\":11000}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderAccessToken}}"
+                }
+              ]
+            },
+            "description": "otp is a STRING (leading zeros). Unpaid COD requires cashCollected (paise) and becomes paid. Wrong OTP: 400 INVALID_DELIVERY_OTP (details.attemptsLeft); after 5 wrong tries 429 DELIVERY_OTP_LOCKED."
           }
         }
       ]

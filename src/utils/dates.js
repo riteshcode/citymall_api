@@ -29,3 +29,22 @@ export function parseDateBoundary(value, edge) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
+
+/** The store-local (IST) calendar date of `date` as YYYY-MM-DD. */
+export function formatStoreDate(date = new Date()) {
+  return new Date(date.getTime() + offsetMs()).toISOString().slice(0, 10);
+}
+
+/** "+05:30"-style UTC offset string for MongoDB's `timezone` option, derived from STORE_UTC_OFFSET_MINUTES. */
+export function storeTimezoneOffset() {
+  const total = env.storeUtcOffsetMinutes;
+  const sign = total < 0 ? '-' : '+';
+  const abs = Math.abs(total);
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
+}
+
+/** The store-local date `days` days after (negative = before) a YYYY-MM-DD date. */
+export function addDaysToStoreDate(dateString, days) {
+  const [y, m, d] = dateString.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}

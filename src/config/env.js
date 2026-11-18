@@ -86,6 +86,19 @@ export const env = {
     handlingFeePaise: toInt(process.env.DEFAULT_HANDLING_FEE_PAISE, 500),
   },
 
+  // Web Push (VAPID). Generate once with `npm run vapid:generate`. Without them push is simply disabled.
+  push: {
+    publicKey: process.env.VAPID_PUBLIC_KEY || '',
+    privateKey: process.env.VAPID_PRIVATE_KEY || '',
+    subject: process.env.VAPID_SUBJECT || 'mailto:admin@aalimarket.in',
+    // Push-service hostnames (suffix match) accepted for subscriptions, in addition to the built-in list of
+    // the browser vendors' services. Subscriptions are rejected otherwise (the server POSTs to that URL).
+    extraAllowedHosts: (process.env.PUSH_EXTRA_ALLOWED_HOSTS || '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
+  },
+
+  // A rider gets this many wrong delivery-OTP attempts per order before it locks (4 digits = 10,000 combinations).
+  deliveryOtpMaxAttempts: toInt(process.env.DELIVERY_OTP_MAX_ATTEMPTS, 5),
+
   // "Today" in dashboard stats / date filters. 330 = IST (UTC+5:30, no DST).
   storeUtcOffsetMinutes: toInt(process.env.STORE_UTC_OFFSET_MINUTES, 330),
 

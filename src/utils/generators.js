@@ -9,3 +9,8 @@ export function generateOrderNumber() {
   const randPart = crypto.randomBytes(4).toString('hex').toUpperCase();
   return `AALI${datePart}${randPart}`;
 }
+
+/** 4-digit delivery OTP ("0042" is valid). Cryptographically random, not Math.random. */
+export function generateDeliveryOtp() {
+  return String(crypto.randomInt(0, 10000)).padStart(4, '0');
+}

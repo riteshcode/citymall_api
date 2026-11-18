@@ -3,6 +3,8 @@ import { sendSuccess } from '../utils/ApiResponse.js';
 import { User } from '../models/User.js';
 import * as otpService from '../services/otp.service.js';
 import * as authService from '../services/auth.service.js';
+import { ApiError } from '../utils/ApiError.js';
+import { ErrorCodes } from '../utils/errorCodes.js';
 
 export const sendOtp = catchAsync(async (req, res) => {
   const { mobile, purpose } = req.body;
@@ -20,6 +22,8 @@ export const verifyOtp = catchAsync(async (req, res) => {
   if (!user) {
     user = await User.create({ mobile, name: name || 'Aali Customer', isVerified: true });
     isNewUser = true;
+  } else if (user.isActive === false) {
+    throw ApiError.forbidden(ErrorCodes.ACCOUNT_DISABLED, 'This account has been deactivated');
   } else if (!user.isVerified) {
     user.isVerified = true;
     await user.save();

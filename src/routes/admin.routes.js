@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { validate } from '../middleware/validate.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { upload } from '../middleware/upload.js';
+import { upload, uploadCsv } from '../middleware/upload.js';
 
 import * as categoryController from '../controllers/category.controller.js';
 import * as productController from '../controllers/product.controller.js';
@@ -12,12 +12,23 @@ import * as uploadController from '../controllers/upload.controller.js';
 import * as adminController from '../controllers/admin.controller.js';
 import * as settingsController from '../controllers/settings.controller.js';
 import * as pincodeController from '../controllers/pincode.controller.js';
+import * as riderController from '../controllers/rider.controller.js';
+import * as reportController from '../controllers/report.controller.js';
 
 import { createCategorySchema, updateCategorySchema, categoryIdParamSchema } from '../validations/category.validation.js';
-import { createProductSchema, updateProductSchema, productIdParamSchema } from '../validations/product.validation.js';
+import {
+  createProductSchema,
+  updateProductSchema,
+  productIdParamSchema,
+  bulkUpdateProductsSchema,
+  importProductsSchema,
+} from '../validations/product.validation.js';
 import { createCouponSchema, updateCouponSchema, couponIdParamSchema } from '../validations/coupon.validation.js';
 import { createBannerSchema, updateBannerSchema, bannerIdParamSchema } from '../validations/banner.validation.js';
 import { adminListProductsSchema, adminListUsersSchema } from '../validations/admin.validation.js';
+import { adminListRidersSchema, createRiderSchema, updateRiderSchema } from '../validations/rider.validation.js';
+import { salesReportSchema, topProductsSchema, codReportSchema } from '../validations/report.validation.js';
+import { adminListReviewsSchema, reviewIdParamSchema } from '../validations/review.validation.js';
 import { updateSettingsSchema } from '../validations/settings.validation.js';
 import {
   listPincodesSchema,
@@ -25,7 +36,13 @@ import {
   updatePincodeSchema,
   pincodeIdParamSchema,
 } from '../validations/pincode.validation.js';
-import { updateOrderStatusSchema, adminListOrdersSchema, orderIdParamSchema } from '../validations/order.validation.js';
+import {
+  updateOrderStatusSchema,
+  adminListOrdersSchema,
+  orderIdParamSchema,
+  assignRiderSchema,
+  latestOrdersSchema,
+} from '../validations/order.validation.js';
 
 const router = Router();
 
@@ -48,6 +65,10 @@ router.delete('/pincodes/:id', validate(pincodeIdParamSchema), pincodeController
 
 // Products
 router.get('/products', validate(adminListProductsSchema), adminController.listProducts);
+// bulk / export / import MUST be registered before '/products/:id', which would treat them as an id.
+router.patch('/products/bulk', validate(bulkUpdateProductsSchema), adminController.bulkUpdateProducts);
+router.get('/products/export', adminController.exportProducts);
+router.post('/products/import', uploadCsv, validate(importProductsSchema), adminController.importProducts);
 router.post('/products', validate(createProductSchema), productController.createProduct);
 router.patch('/products/:id', validate(updateProductSchema), productController.updateProduct);
 router.delete('/products/:id', validate(productIdParamSchema), productController.deleteProduct);
@@ -72,8 +93,24 @@ router.delete('/banners/:id', validate(bannerIdParamSchema), bannerController.de
 
 // Orders
 router.get('/orders', validate(adminListOrdersSchema), orderController.adminListOrders);
+router.get('/orders/latest', validate(latestOrdersSchema), orderController.adminLatestOrders); // before '/orders/:id'
 router.get('/orders/:id', validate(orderIdParamSchema), orderController.adminGetOrder);
+router.patch('/orders/:id/assign', validate(assignRiderSchema), orderController.adminAssignRider);
 router.patch('/orders/:id/status', validate(updateOrderStatusSchema), orderController.adminUpdateOrderStatus);
+
+// Delivery riders (they log in through the normal OTP flow; role = rider)
+router.get('/riders', validate(adminListRidersSchema), riderController.listRiders);
+router.post('/riders', validate(createRiderSchema), riderController.createRider);
+router.patch('/riders/:id', validate(updateRiderSchema), riderController.updateRider);
+
+// Reports
+router.get('/reports/sales', validate(salesReportSchema), reportController.sales);
+router.get('/reports/top-products', validate(topProductsSchema), reportController.topProducts);
+router.get('/reports/cod', validate(codReportSchema), reportController.cod);
+
+// Reviews moderation
+router.get('/reviews', validate(adminListReviewsSchema), adminController.listReviews);
+router.delete('/reviews/:id', validate(reviewIdParamSchema), adminController.deleteReview);
 
 // Media uploads (product/category/banner images)
 router.post('/uploads', upload.array('images', 6), uploadController.uploadImages);

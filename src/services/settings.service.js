@@ -12,6 +12,13 @@ export function defaultSettings() {
     handlingFee: env.pricing.handlingFeePaise,
     minOrderValue: 0,
     storeOpen: true,
+    storeName: 'Aali Market',
+    phone: '',
+    whatsapp: '',
+    email: '',
+    address: { line1: '', city: '', state: '', pincode: '' },
+    fssaiNumber: '',
+    gstin: '',
     storeTimings: { open: '08:00', close: '22:00' },
   };
 }
@@ -30,11 +37,11 @@ export async function getSettings() {
 }
 
 export async function updateSettings(patch) {
-  const { storeTimings, ...rest } = patch;
+  const { storeTimings, address, ...rest } = patch;
   const $set = { ...rest };
-  // Dot-paths so patching only `open` doesn't wipe `close`.
-  if (storeTimings) {
-    for (const [k, v] of Object.entries(storeTimings)) $set[`storeTimings.${k}`] = v;
+  // Dot-paths so patching only `open` (or only `city`) doesn't wipe its siblings.
+  for (const [prefix, nested] of [['storeTimings', storeTimings], ['address', address]]) {
+    if (nested) for (const [k, v] of Object.entries(nested)) $set[`${prefix}.${k}`] = v;
   }
   await getSettings(); // make sure the document exists before updating
   return Setting.findOneAndUpdate({ key: KEY }, { $set }, { new: true, runValidators: true });
@@ -49,5 +56,17 @@ export function serializeSettings(doc) {
     minOrderValue: doc.minOrderValue,
     storeOpen: doc.storeOpen,
     storeTimings: { open: doc.storeTimings.open, close: doc.storeTimings.close },
+    storeName: doc.storeName ?? 'Aali Market',
+    phone: doc.phone ?? '',
+    whatsapp: doc.whatsapp ?? '',
+    email: doc.email ?? '',
+    address: {
+      line1: doc.address?.line1 ?? '',
+      city: doc.address?.city ?? '',
+      state: doc.address?.state ?? '',
+      pincode: doc.address?.pincode ?? '',
+    },
+    fssaiNumber: doc.fssaiNumber ?? '',
+    gstin: doc.gstin ?? '',
   };
 }

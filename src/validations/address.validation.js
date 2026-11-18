@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { pincodeSchema, objectIdSchema } from '../utils/zodHelpers.js';
+import { pincodeSchema, objectIdSchema, locationSchema } from '../utils/zodHelpers.js';
 
 const addressBody = z
   .object({
@@ -11,6 +11,7 @@ const addressBody = z
     state: z.string().trim().min(1).max(80),
     pincode: pincodeSchema,
     isDefault: z.boolean().default(false),
+    location: locationSchema.optional(),
   })
   .strict();
 
@@ -18,7 +19,8 @@ export const createAddressSchema = { body: addressBody };
 
 export const updateAddressSchema = {
   params: z.object({ id: objectIdSchema }).strict(),
-  body: addressBody.partial(),
+  // location: null clears a previously saved pin
+  body: addressBody.partial().extend({ location: locationSchema.nullable().optional() }),
 };
 
 export const addressIdParamSchema = {

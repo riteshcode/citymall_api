@@ -14,10 +14,33 @@ async function recomputeProductRating(productId) {
     { $group: { _id: '$product', avg: { $avg: '$rating' }, count: { $sum: 1 } } },
   ]);
 
-  await Product.updateOne(
-    { _id: productId },
-    { ratingAvg: agg ? Math.round(agg.avg * 10) / 10 : 0, ratingCount: agg ? agg.count : 0 }
-  );
+  const rating = { ratingAvg: agg ? Math.round(agg.avg * 10) / 10 : 0, ratingCount: agg ? agg.count : 0 };
+  await Product.updateOne({ _id: productId }, rating);
+  return rating;
+}
+
+/** Admin: all reviews, newest first, with who wrote them and what they're about. */
+export async function listAllReviews({ page, limit, productId, rating }) {
+  const filter = {};
+  if (productId) filter.product = productId;
+  if (rating) filter.rating = rating;
+  return paginateQuery(Review, filter, {
+    page,
+    limit,
+    sort: { createdAt: -1 },
+    populate: [
+      { path: 'user', select: 'name mobile' },
+      { path: 'product', select: 'title slug' },
+    ],
+  });
+}
+
+/** Admin: removes a review and recalculates the product's ratingAvg / ratingCount (the author may review again). */
+export async function deleteReview(reviewId) {
+  const review = await Review.findByIdAndDelete(reviewId);
+  if (!review) throw ApiError.notFound(ErrorCodes.REVIEW_NOT_FOUND, 'Review not found');
+  const rating = await recomputeProductRating(review.product.toString());
+  return { id: review.id, product: { id: review.product.toString(), ...rating } };
 }
 
 export async function listProductReviews(productId, { page, limit }) {

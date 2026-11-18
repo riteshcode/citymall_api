@@ -17,6 +17,8 @@ tags:
   - name: Orders
   - name: Payments
   - name: Reviews
+  - name: Rider
+  - name: Push
   - name: Admin
 
 components:
@@ -60,6 +62,12 @@ components:
         line1: { type: string }
         line2: { type: string }
         landmark: { type: string }
+        location:
+          type: object
+          description: Optional pin for the rider; both values or none. Send null on PATCH to clear.
+          properties:
+            lat: { type: number, minimum: -90, maximum: 90 }
+            lng: { type: number, minimum: -180, maximum: 180 }
         city: { type: string }
         state: { type: string }
         pincode: { type: string, example: '110001' }
@@ -88,6 +96,19 @@ components:
     StoreSettings:
       type: object
       properties:
+        storeName: { type: string, example: 'Aali Market, Sitapur' }
+        phone: { type: string, example: '+91 98765 43210' }
+        whatsapp: { type: string, example: '9876543210' }
+        email: { type: string, example: hello@aalimarket.in }
+        address:
+          type: object
+          properties:
+            line1: { type: string }
+            city: { type: string }
+            state: { type: string }
+            pincode: { type: string }
+        fssaiNumber: { type: string, description: '14 digits, or empty' }
+        gstin: { type: string, description: '15 characters, or empty' }
         deliveryFee: { type: integer, description: paise }
         freeDeliveryThreshold: { type: integer, description: paise }
         handlingFee: { type: integer, description: paise }
@@ -532,6 +553,7 @@ paths:
               properties:
                 addressId: { type: string }
                 paymentMethod: { type: string, enum: [cod, upi, card, netbanking] }
+                deliveryNote: { type: string, maxLength: 200, description: 'Shown to the rider' }
       responses:
         '201':
           description: Order created (or replayed if Idempotency-Key was already used)
@@ -759,7 +781,7 @@ paths:
                 razorpay_order_id: { type: string, description: Optional; cross-checked against the stored provider order id }
       responses:
         '200': { description: Order with paymentStatus = paid (idempotent) }
-        '400': { description: PAYMENT_SIGNATURE_INVALID | PAYMENT_NOT_REQUIRED | ORDER_NOT_PAYABLE }
+        '400': { description: 'PAYMENT_SIGNATURE_INVALID | PAYMENT_NOT_REQUIRED | ORDER_NOT_PAYABLE' }
         '404': { description: ORDER_NOT_FOUND }
 
   /admin/stats:
@@ -895,3 +917,323 @@ paths:
       responses:
         '200': { description: OK }
         '404': { description: PINCODE_NOT_FOUND }
+
+  /orders/{id}/payment:
+    post:
+      tags: [Orders]
+      summary: Pay again - creates a fresh gateway order for an unpaid online order
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: '{ payment: { provider, keyId, providerOrderId, amount, currency } }' }
+        '400': { description: 'PAYMENT_NOT_RETRYABLE (COD, paid, cancelled)' }
+        '404': { description: ORDER_NOT_FOUND }
+        '502': { description: PAYMENT_PROVIDER_ERROR }
+
+  /orders/{id}/payment-method:
+    patch:
+      tags: [Orders]
+      summary: Switch an unpaid online order to cash on delivery
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paymentMethod]
+              properties: { paymentMethod: { type: string, enum: [cod] } }
+      responses:
+        '200': { description: The order (owner view incl. deliveryOtp) with payment null }
+        '400': { description: PAYMENT_METHOD_NOT_CHANGEABLE }
+
+  /orders/{id}/reorder:
+    post:
+      tags: [Orders]
+      summary: Buy again - add a past order's items to the cart
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200':
+          description: >
+            { cart (same shape as GET /cart), skipped: [{ productId, title, reason, requested, added }] };
+            reason is inactive | out_of_stock | qty_reduced. Prices are today's; quantities never exceed stock.
+        '404': { description: ORDER_NOT_FOUND }
+
+  /push/vapid-public-key:
+    get:
+      tags: [Push]
+      summary: VAPID public key for pushManager.subscribe()
+      responses:
+        '200': { description: '{ publicKey }' }
+        '503': { description: PUSH_NOT_CONFIGURED }
+
+  /me/push-subscriptions:
+    post:
+      tags: [Push]
+      summary: Register the browser's PushSubscription
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint, keys]
+              properties:
+                endpoint: { type: string, description: 'https URL of a known browser push service' }
+                expirationTime: { type: number, nullable: true }
+                keys:
+                  type: object
+                  required: [p256dh, auth]
+                  properties:
+                    p256dh: { type: string, description: base64url, 65 bytes }
+                    auth: { type: string, description: base64url, 16 bytes }
+      responses:
+        '201': { description: '{ id, endpoint, createdAt }' }
+        '400': { description: VALIDATION_ERROR (bad shape or unsupported push service) }
+        '503': { description: PUSH_NOT_CONFIGURED }
+    delete:
+      tags: [Push]
+      summary: Remove a push subscription
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties: { endpoint: { type: string } }
+      responses:
+        '200': { description: '{ removed: 0 | 1 }' }
+
+  /rider/orders:
+    get:
+      tags: [Rider]
+      summary: Orders assigned to the signed-in rider
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: status, in: query, schema: { type: string, enum: [placed, confirmed, packed, shipped, out_for_delivery, delivered, cancelled] } }
+      responses:
+        '200': { description: 'Orders with user { name, mobile }; never includes deliveryOtp' }
+        '403': { description: 'FORBIDDEN (not a rider) | ACCOUNT_DISABLED' }
+
+  /rider/orders/{id}/out-for-delivery:
+    patch:
+      tags: [Rider]
+      summary: Mark an assigned order out for delivery
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK }
+        '400': { description: INVALID_ORDER_STATE }
+        '404': { description: ORDER_NOT_FOUND (also for other riders' orders) }
+
+  /rider/orders/{id}/deliver:
+    post:
+      tags: [Rider]
+      summary: Complete a delivery with the customer's 4-digit OTP
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [otp]
+              properties:
+                otp: { type: string, pattern: '^[0-9]{4}$', description: A string - leading zeros matter }
+                cashCollected: { type: integer, description: 'paise; required for unpaid COD, not allowed otherwise' }
+      responses:
+        '200': { description: 'Delivered (COD becomes paid, cashCollected saved)' }
+        '400': { description: 'INVALID_DELIVERY_OTP (details.attemptsLeft) | INVALID_ORDER_STATE | VALIDATION_ERROR' }
+        '429': { description: DELIVERY_OTP_LOCKED }
+
+  /admin/orders/latest:
+    get:
+      tags: [Admin]
+      summary: New-order alert (poll with the newest createdAt you have seen)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: since, in: query, required: true, schema: { type: string, format: date-time }, description: 'ISO datetime with zone; exclusive' }
+      responses:
+        '200': { description: '{ count, orders: [{ id, orderNumber, total, createdAt }] } - newest 10' }
+
+  /admin/orders/{id}/assign:
+    patch:
+      tags: [Admin]
+      summary: Assign (or unassign with null) a delivery rider
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [riderId]
+              properties: { riderId: { type: string, nullable: true } }
+      responses:
+        '200': { description: 'Order with rider { id, name, mobile }' }
+        '400': { description: 'ORDER_NOT_ASSIGNABLE (delivered / cancelled order, inactive rider)' }
+        '404': { description: 'ORDER_NOT_FOUND | RIDER_NOT_FOUND' }
+
+  /admin/riders:
+    get:
+      tags: [Admin]
+      summary: List delivery riders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: isActive, in: query, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200': { description: 'Array of { id, name, mobile, isActive, activeOrders, createdAt } + meta' }
+    post:
+      tags: [Admin]
+      summary: Create a rider (they log in with the normal OTP flow)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, mobile]
+              properties:
+                name: { type: string }
+                mobile: { type: string, example: '9877700001' }
+                isActive: { type: boolean, default: true }
+      responses:
+        '201': { description: Created }
+        '409': { description: MOBILE_ALREADY_REGISTERED }
+
+  /admin/riders/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update a rider (name, mobile, isActive)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: OK }
+        '404': { description: RIDER_NOT_FOUND }
+        '409': { description: MOBILE_ALREADY_REGISTERED }
+
+  /admin/reports/sales:
+    get:
+      tags: [Admin]
+      summary: Sales per period (IST; cancelled and failed/refunded payments excluded)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, schema: { type: string }, description: 'YYYY-MM-DD or ISO; default 30 days before `to`' }
+        - { name: to, in: query, schema: { type: string }, description: 'YYYY-MM-DD (inclusive) or ISO; default today' }
+        - { name: groupBy, in: query, schema: { type: string, enum: [day, week, month], default: day } }
+      responses:
+        '200': { description: '[{ period, orders, revenue (paise), avgOrderValue (paise) }]; period is YYYY-MM-DD (day; week = its Monday) or YYYY-MM' }
+
+  /admin/reports/top-products:
+    get:
+      tags: [Admin]
+      summary: Best-selling products
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, schema: { type: string } }
+        - { name: to, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 10, minimum: 1, maximum: 50 } }
+      responses:
+        '200': { description: '[{ productId, title {en,hi}, qtySold, revenue (paise, before coupons) }]' }
+
+  /admin/reports/cod:
+    get:
+      tags: [Admin]
+      summary: Cash-on-delivery reconciliation for one IST day
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, example: '2026-11-18' } }
+      responses:
+        '200': { description: '{ date, totalExpected, totalCollected, byRider: [{ rider {id,name,mobile}|null, orders, expected, collected }] }' }
+
+  /admin/products/bulk:
+    patch:
+      tags: [Admin]
+      summary: Bulk update price / mrp / stock / isActive (max 200 rows)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 200
+              items:
+                type: object
+                required: [id]
+                properties:
+                  id: { type: string }
+                  price: { type: integer }
+                  mrp: { type: integer }
+                  stock: { type: integer }
+                  isActive: { type: boolean }
+      responses:
+        '200': { description: '{ updated, failed: [{ id, error }] } - valid rows are applied even if others fail' }
+
+  /admin/products/export:
+    get:
+      tags: [Admin]
+      summary: Download all products as CSV
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: 'text/csv (UTF-8 with BOM); columns id, slug, title_en, title_hi, category_slug, brand, unit, mrp, price, stock, isActive; money in paise'
+          content:
+            text/csv:
+              schema: { type: string }
+
+  /admin/products/import:
+    post:
+      tags: [Admin]
+      summary: Create / update products from a CSV in the export format
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: dryRun, in: query, schema: { type: string, enum: ['true', 'false'], default: 'false' }, description: 'true validates and counts without writing' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary, description: '.csv, max 2 MB, max 2000 rows' }
+      responses:
+        '200': { description: '{ created, updated, errors: [{ row (header = 1), error }], dryRun }' }
+        '400': { description: 'VALIDATION_ERROR (not a csv, unknown column, no slug column, too many rows)' }
+        '413': { description: FILE_TOO_LARGE }
+
+  /admin/reviews:
+    get:
+      tags: [Admin]
+      summary: All reviews (moderation)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: productId, in: query, schema: { type: string } }
+        - { name: rating, in: query, schema: { type: integer, minimum: 1, maximum: 5 } }
+      responses:
+        '200': { description: 'Reviews with user { name, mobile } and product { title, slug } + meta' }
+
+  /admin/reviews/{id}:
+    delete:
+      tags: [Admin]
+      summary: Delete a review and recalculate the product rating
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: '{ id, product: { id, ratingAvg, ratingCount } }' }
+        '404': { description: REVIEW_NOT_FOUND }

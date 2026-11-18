@@ -42,3 +42,13 @@ export const pageQuerySchema = z
     limit: z.coerce.number().int().min(1).max(100).default(20),
   })
   .strict();
+
+export const locationSchema = z
+  .object({
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+  })
+  .strict();
+
+// NOT z.coerce.boolean(): Boolean("false") === true.
+export const boolParam = z.enum(['true', 'false']).transform((v) => v === 'true');

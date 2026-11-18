@@ -7,11 +7,12 @@ import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
 import { buildPricing, computeSubtotal } from './pricing.service.js';
 import { getEligibleCoupon, recordCouponRedemption } from './coupon.service.js';
-import { generateOrderNumber } from '../utils/generators.js';
+import { generateOrderNumber, generateDeliveryOtp } from '../utils/generators.js';
 import { paginateQuery } from '../utils/mongoosePlugins.js';
 import { containsRegex } from '../utils/regex.js';
 import { parseDateBoundary } from '../utils/dates.js';
 import { getSettings } from './settings.service.js';
+import { notifyOrderStatusChange } from './push.service.js';
 import { resolveDelivery } from './serviceability.service.js';
 
 const CANCELLABLE_STATUSES = ['placed', 'confirmed', 'packed'];
@@ -23,7 +24,7 @@ const CANCELLABLE_STATUSES = ['placed', 'confirmed', 'packed'];
  * price and coupon eligibility from scratch inside a transaction — the
  * cart's cached state is never trusted.
  */
-export async function createOrder(userId, { addressId, paymentMethod, idempotencyKey }) {
+export async function createOrder(userId, { addressId, paymentMethod, idempotencyKey, deliveryNote = '' }) {
   const existing = await Order.findOne({ idempotencyKey, user: userId });
   if (existing) return existing;
 
@@ -141,6 +142,8 @@ export async function createOrder(userId, { addressId, paymentMethod, idempotenc
             statusHistory: [{ status: 'placed', at: new Date() }],
             expectedDeliveryAt: new Date(Date.now() + delivery.etaDays * 24 * 60 * 60 * 1000),
             idempotencyKey,
+            deliveryNote,
+            deliveryOtp: generateDeliveryOtp(),
           },
         ],
         { session }
@@ -198,15 +201,34 @@ export async function listAllOrders({ page, limit, status, from, to, q }) {
     page,
     limit,
     sort: { createdAt: -1 },
-    populate: { path: 'user', select: 'name mobile' },
+    populate: [
+      { path: 'user', select: 'name mobile' },
+      { path: 'rider', select: 'name mobile' }, // null while unassigned
+    ],
   });
+}
+
+/** Admin new-order alert: how many orders came in after `since`, plus the newest 10. Cheap enough to poll. */
+export async function listLatestOrders(since) {
+  const filter = { createdAt: { $gt: since } };
+  const [count, orders] = await Promise.all([
+    Order.countDocuments(filter),
+    Order.find(filter).sort({ createdAt: -1 }).limit(10).select('orderNumber pricing.total createdAt').lean(),
+  ]);
+  return {
+    count,
+    orders: orders.map((o) => ({ id: o._id.toString(), orderNumber: o.orderNumber, total: o.pricing.total, createdAt: o.createdAt })),
+  };
 }
 
 export async function getOrderById(userId, orderId, { isAdmin = false } = {}) {
   const filter = isAdmin ? { _id: orderId } : { _id: orderId, user: userId };
   const query = Order.findOne(filter);
   // Admin gets the full customer card alongside the order.
-  if (isAdmin) query.populate({ path: 'user', select: 'name mobile email isVerified createdAt' });
+  if (isAdmin) {
+    query.populate({ path: 'user', select: 'name mobile email isVerified createdAt' });
+    query.populate({ path: 'rider', select: 'name mobile' });
+  }
   const order = await query;
   if (!order) {
     throw ApiError.notFound(ErrorCodes.ORDER_NOT_FOUND, 'Order not found');
@@ -257,5 +279,14 @@ export async function updateOrderStatus(orderId, status, note) {
   order.status = status;
   order.statusHistory.push({ status, at: new Date(), note: note || '' });
   await order.save();
+  notifyOrderStatusChange(order);
   return order;
+}
+
+/**
+ * The customer-facing shape of an order: the normal JSON plus the delivery OTP (which the model otherwise strips
+ * from every serialisation). Only the order's OWNER ever gets this — never admin or rider responses.
+ */
+export function customerOrderJSON(order) {
+  return { ...order.toJSON(), deliveryOtp: order.deliveryOtp ?? null };
 }

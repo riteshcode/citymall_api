@@ -80,3 +80,14 @@ export const updateProductSchema = {
     })
     .strict(),
 };
+
+// ---- bulk / CSV (admin)
+// The body is only checked to be an array here; each ROW is validated individually by the service, so one bad
+// row is reported in `failed` instead of rejecting the whole request.
+export const bulkUpdateProductsSchema = {
+  body: z.array(z.unknown()).min(1, 'Send at least one row').max(200, 'At most 200 rows per request'),
+};
+
+export const importProductsSchema = {
+  query: z.object({ dryRun: z.enum(['true', 'false']).transform((v) => v === 'true').optional() }).strict(),
+};
