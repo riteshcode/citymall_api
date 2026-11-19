@@ -4,7 +4,6 @@ import { createApp } from '../src/app.js';
 import { env } from '../src/config/env.js';
 import { Order } from '../src/models/Order.js';
 import { User } from '../src/models/User.js';
-import { getLastOtpForTesting } from '../src/services/sms.provider.js';
 import { createAuthedUser, createCategory, createProduct, createAddress, placeOrder, adminSetStatus, bearer } from './helpers.js';
 
 const app = createApp();
@@ -22,15 +21,22 @@ describe('Riders — admin management, login, assignment', () => {
     customerH = bearer(await createAuthedUser({ mobile: '9855500001' }));
   });
 
-  const create = (body, h = adminH) => request(app).post(`${base}/admin/riders`).set(h).send(body);
+  let usernameSeq = 0;
+  // usernames / passwords are required now: fill them in unless the test sets them itself
+  const create = (body, h = adminH) => {
+    usernameSeq += 1;
+    const filled = body && typeof body === 'object' && !Array.isArray(body) ? { username: `rider.${usernameSeq}`, password: 'Rid3rPass1', ...body } : body;
+    return request(app).post(`${base}/admin/riders`).set(h).send(filled);
+  };
 
   it('creates a rider (role rider, active, no orders yet)', async () => {
-    const res = await create({ name: 'Ramesh Kumar', mobile: '9877700001' });
+    const res = await create({ name: 'Ramesh Kumar', mobile: '9877700001', username: 'ramesh.kumar' });
     expect(res.status).toBe(201);
     expect(res.body.data).toEqual({
       id: expect.stringMatching(/^[0-9a-f]{24}$/),
       name: 'Ramesh Kumar',
       mobile: '9877700001',
+      username: 'ramesh.kumar',
       isActive: true,
       activeOrders: 0,
       createdAt: expect.any(String),
@@ -96,27 +102,26 @@ describe('Riders — admin management, login, assignment', () => {
     expect((await request(app).get(`${base}/admin/orders`).set(riderH)).status).toBe(403);
   });
 
-  it('a rider logs in through the normal OTP flow and keeps role "rider"', async () => {
-    await create({ name: 'Login Rider', mobile: '9877700041' });
-    await request(app).post(`${base}/auth/otp/send`).send({ mobile: '9877700041', purpose: 'login' });
-    const verify = await request(app)
-      .post(`${base}/auth/otp/verify`)
-      .send({ mobile: '9877700041', code: getLastOtpForTesting('9877700041'), purpose: 'login' });
+  it('a rider signs in with username + password and keeps role "rider"; their mobile can no longer use the OTP flow', async () => {
+    await create({ name: 'Login Rider', mobile: '9877700041', username: 'login.rider', password: 'Rid3rPass1' });
+    const verify = await request(app).post(`${base}/auth/staff/login`).send({ username: 'login.rider', password: 'Rid3rPass1' });
     expect(verify.status).toBe(200);
     expect(verify.body.data.isNewUser).toBe(false);
-    expect(verify.body.data.user).toMatchObject({ role: 'rider', name: 'Login Rider' });
+    expect(verify.body.data.user).toMatchObject({ role: 'rider', name: 'Login Rider', username: 'login.rider' });
 
     const orders = await request(app).get(`${base}/rider/orders`).set({ Authorization: `Bearer ${verify.body.data.accessToken}` });
     expect(orders.status).toBe(200);
+
+    const otp = await request(app).post(`${base}/auth/otp/send`).send({ mobile: '9877700041', purpose: 'login' });
+    expect([otp.status, otp.body.error.code]).toEqual([403, 'USE_PASSWORD_LOGIN']);
   });
 
   it('a deactivated rider cannot log in and a token they already hold stops working', async () => {
-    const r = (await create({ name: 'Fired Rider', mobile: '9877700051' })).body.data;
+    const r = (await create({ name: 'Fired Rider', mobile: '9877700051', username: 'fired.rider', password: 'Rid3rPass1' })).body.data;
     const token = (await createAuthedUser({ role: 'rider', mobile: '9877700099' })).accessToken; // unrelated, stays valid
 
     // log in first, then get deactivated
-    await request(app).post(`${base}/auth/otp/send`).send({ mobile: '9877700051', purpose: 'login' });
-    const login = await request(app).post(`${base}/auth/otp/verify`).send({ mobile: '9877700051', code: getLastOtpForTesting('9877700051'), purpose: 'login' });
+    const login = await request(app).post(`${base}/auth/staff/login`).send({ username: 'fired.rider', password: 'Rid3rPass1' });
     const heldToken = login.body.data.accessToken;
     expect((await request(app).get(`${base}/rider/orders`).set({ Authorization: `Bearer ${heldToken}` })).status).toBe(200);
 
@@ -126,8 +131,7 @@ describe('Riders — admin management, login, assignment', () => {
     expect([blocked.status, blocked.body.error.code]).toEqual([403, 'ACCOUNT_DISABLED']);
     expect((await request(app).get(`${base}/me`).set({ Authorization: `Bearer ${heldToken}` })).status).toBe(403);
 
-    await request(app).post(`${base}/auth/otp/send`).send({ mobile: '9877700051', purpose: 'login' });
-    const relogin = await request(app).post(`${base}/auth/otp/verify`).send({ mobile: '9877700051', code: getLastOtpForTesting('9877700051'), purpose: 'login' });
+    const relogin = await request(app).post(`${base}/auth/staff/login`).send({ username: 'fired.rider', password: 'Rid3rPass1' });
     expect([relogin.status, relogin.body.error.code]).toEqual([403, 'ACCOUNT_DISABLED']);
     expect((await request(app).get(`${base}/rider/orders`).set({ Authorization: `Bearer ${token}` })).status).toBe(200);
   });

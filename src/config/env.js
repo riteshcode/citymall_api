@@ -105,7 +105,34 @@ export const env = {
   // A product counts as "low stock" at or below this many units (admin product filter + dashboard stats).
   lowStockThreshold: toInt(process.env.LOW_STOCK_THRESHOLD, 10),
 
+  // bcrypt work factor for staff passwords. 12 in every real environment; tests use 4 so the suite stays fast.
+  bcryptCost: process.env.NODE_ENV === 'test' ? 4 : toInt(process.env.BCRYPT_COST, 12),
+
+  // Admin / rider username + password login (POST /auth/staff/login).
+  staff: {
+    maxFailedAttempts: 5, // wrong passwords before the account locks
+    lockMinutes: 15,
+    loginWindowMinutes: 15,
+    loginIpLimit: toInt(process.env.STAFF_LOGIN_IP_LIMIT, 20), // failed attempts per IP per window
+    loginUserLimit: toInt(process.env.STAFF_LOGIN_USER_LIMIT, 10), // failed attempts per username per window
+  },
+
+  // Reverse geocoding for GET /geo/reverse ("Delivering to G Block, Sector 63").
+  geo: {
+    provider: (process.env.GEO_PROVIDER || 'nominatim').trim().toLowerCase(), // nominatim (free, OpenStreetMap) | google
+    googleApiKey: process.env.GOOGLE_MAPS_API_KEY || '',
+    // Nominatim's usage policy requires an identifying User-Agent (put a contact in it, e.g. "AaliMarket/1.0 (ops@your-domain)").
+    userAgent: process.env.GEO_USER_AGENT || 'AaliMarketApi/1.0',
+    // Nominatim allows at most 1 request per second: outbound calls are spaced this far apart.
+    nominatimMinIntervalMs: toInt(process.env.GEO_NOMINATIM_MIN_INTERVAL_MS, 1100),
+    cacheTtlMs: 24 * 60 * 60 * 1000,
+    rateLimitPerMinute: toInt(process.env.GEO_RATE_LIMIT_PER_MINUTE, 30), // per IP
+  },
+
   seed: {
+    adminUsername: (process.env.SEED_ADMIN_USERNAME || 'admin').trim().toLowerCase(),
+    // No default: in production the seed refuses to run without it.
+    adminPassword: process.env.SEED_ADMIN_PASSWORD || '',
     adminMobile: process.env.SEED_ADMIN_MOBILE || '9999999999',
     adminName: process.env.SEED_ADMIN_NAME || 'Aali Admin',
     adminEmail: process.env.SEED_ADMIN_EMAIL || 'admin@aalimarket.in',

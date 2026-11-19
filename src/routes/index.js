@@ -10,6 +10,8 @@ import wishlistRoutes from './wishlist.routes.js';
 import settingsRoutes from './settings.routes.js';
 import riderRoutes from './rider.routes.js';
 import pushRoutes from './push.routes.js';
+import geoRoutes from './geo.routes.js';
+import couponRoutes from './coupon.routes.js';
 
 const router = Router();
 
@@ -24,5 +26,7 @@ router.use('/admin', adminRoutes);
 router.use('/wishlist', wishlistRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/rider', riderRoutes);
+router.use('/geo', geoRoutes);
+router.use('/coupons', couponRoutes);
 
 export default router;

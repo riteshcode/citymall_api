@@ -38,13 +38,20 @@ npm test                 # Jest + Supertest, using an in-memory Mongo replica se
 
 ### Logging in during development
 
-OTPs are never returned in the API response. In development (`SMS_PROVIDER=console`, the default), the code is printed to the server console instead of being sent via a real SMS gateway:
+**Customers** sign in with an OTP. In development (`SMS_PROVIDER=console`, the default) the code is printed to the server console instead of being sent via a real SMS gateway, and is also echoed as `code` in the `POST /auth/otp/send` response:
 
 ```
-[SMS:console-stub] OTP for 9999999999 is 482913
+[SMS:console-stub] OTP for 9876543210 is 482913
 ```
 
-The seeded admin mobile number is set by `SEED_ADMIN_MOBILE` in `.env` (default `9999999999`) — log in with `POST /auth/otp/send` → check the console → `POST /auth/otp/verify`.
+In **production** the response never contains `code` (it is echoed only when `NODE_ENV != production` **and** `SMS_PROVIDER=console`).
+
+**Admins and riders** sign in with **username + password** (`POST /auth/staff/login`); their mobiles are refused by the OTP endpoints (`403 USE_PASSWORD_LOGIN`). The seed creates the admin from `SEED_ADMIN_USERNAME` (default `admin`) and `SEED_ADMIN_PASSWORD` — there is **no default password**, and with `NODE_ENV=production` `npm run seed` refuses to run without it. To set or reset a password later (also for an admin created before password login existed):
+
+```bash
+npm run admin:set-password -- admin                          # asks for the new password (not echoed)
+npm run admin:set-password -- admin --mobile 9999999999      # an older admin that has no username yet: gives it one
+```
 
 ## Environment variables
 
@@ -61,7 +68,9 @@ See [`.env.example`](.env.example) for the full list with defaults. Key groups:
 | Storage | `STORAGE_PROVIDER` (`cloudinary` default \| `s3`), `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` (S3_* only if `s3`). The server boots without them; uploads then fail with `UPLOAD_FAILED` |
 | Payments | `PAYMENT_PROVIDER` (`mock` or `razorpay`-shaped), webhook secret |
 | Pricing | default delivery fee, free-delivery threshold, handling fee (all in paise) |
-| Seed | admin user identity created by `npm run seed` |
+| Staff login | `STAFF_LOGIN_IP_LIMIT` / `STAFF_LOGIN_USER_LIMIT` (failed attempts per 15 min), `BCRYPT_COST` (keep 12) |
+| Geo | `GEO_PROVIDER` (`nominatim` default \| `google`), `GOOGLE_MAPS_API_KEY`, `GEO_USER_AGENT` (put a contact in it: Nominatim's policy), `GEO_RATE_LIMIT_PER_MINUTE` |
+| Seed | `SEED_ADMIN_USERNAME`, `SEED_ADMIN_PASSWORD` (required in production, no default), mobile / name / email of the admin created by `npm run seed` |
 
 ## Project structure
 
@@ -99,12 +108,14 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/auth/otp/send` | Send a 6-digit OTP (rate-limited: 3 / 15 min / mobile) |
-| POST | `/auth/otp/verify` | Verify OTP → creates user if new, returns access + refresh tokens |
+| POST | `/auth/otp/send` | **Customers**: send a 6-digit OTP (rate-limited: 3 / 15 min / mobile). `403 USE_PASSWORD_LOGIN` for an admin / rider mobile. `code` is in the response only in local development |
+| POST | `/auth/otp/verify` | Verify OTP → creates user if new, returns access + refresh tokens (`403 USE_PASSWORD_LOGIN` for staff) |
+| POST | `/auth/staff/login` | **Admin / rider**: `{ username, password }` → `{ user, accessToken, refreshToken, isNewUser: false }`. Wrong password / unknown username / customer = the same `401 INVALID_CREDENTIALS`; 5 wrong tries lock the account 15 min (`429 ACCOUNT_LOCKED`, `details.retryAfterSeconds`); inactive = `403 ACCOUNT_DISABLED`; own rate limiters per IP and per username |
 | POST | `/auth/refresh` | Exchange refresh token for a new pair (rotates + revokes the old one) |
 | POST | `/auth/logout` | Revoke a refresh token |
 | GET | `/me` 🔒 | Get current user profile |
 | PATCH | `/me` 🔒 | Update name/email |
+| PATCH | `/me/password` 🔒 | **Staff only**: `{ currentPassword, newPassword }` (min 8, a letter and a number). Signs every other session out and returns a fresh `{ accessToken, refreshToken, passwordChangedAt }` |
 
 ### Catalog
 
@@ -144,6 +155,15 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | GET | `/serviceability?pincode=` | Serviceability from the admin-managed pincode list → `{ pincode, serviceable, etaDays, areaName, deliveryFee }` |
 | GET | `/settings` | Public store settings **and store info** (`storeName`, `phone`, `whatsapp`, `email`, `address`, `fssaiNumber`, `gstin` — for legal pages / invoices / contact): `deliveryFee`, `freeDeliveryThreshold`, `handlingFee`, `minOrderValue`, `storeOpen`, `storeTimings` (paise) — for "add ₹X more for free delivery" |
 
+### Location, areas and offers
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/geo/reverse?lat=&lng=` | Public. Current location → `{ pincode, area, city, state }` (`area` = e.g. "G Block, Sector 63") for "Delivering to …". India only (`404 GEO_NOT_FOUND` otherwise). Provider from `GEO_PROVIDER`; results cached 24 h per 3-decimal cell; Nominatim calls queued 1/second; per-IP rate limit |
+| GET | `/coupons/available` | Public, token optional. Active coupons inside their dates and not used up → `[{ code, type, value, minOrderValue, maxDiscount, expiresAt, description {en,hi}\|null }]`. With a token, coupons the user already used up (per-user limit) are removed |
+
+`GET /serviceability` now also returns `etaMinutes` (set for quick-delivery pincodes, else `null`); with it set, an order's `expectedDeliveryAt` is order time + `etaMinutes`.
+
 ### Checkout & Orders
 
 | Method | Path | Description |
@@ -151,12 +171,12 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | POST | `/orders` 🔒 | Place order from cart (rejected with `STORE_CLOSED` / `MIN_ORDER_VALUE` / `NOT_SERVICEABLE` per store settings; online methods also return a `payment` block `{ provider, keyId, providerOrderId, amount, currency }`). **Requires `Idempotency-Key` header.** Re-validates stock/price/coupon in a transaction; decrements stock; clears cart |
 | GET | `/orders` 🔒 | List current user's orders (paginated) |
 | GET | `/orders/:id` 🔒 | Order detail with `statusHistory` for tracking |
-| POST | `/orders/:id/cancel` 🔒 | Cancel (only while `placed`/`confirmed`/`packed`); restores stock |
+| POST | `/orders/:id/cancel` 🔒 | Cancel (only while `placed`/`confirmed`/`packed`): stock goes back to the same variant, the coupon is given back, and a **paid online order is refunded** (see [Cancellation and refunds](#cancellation-and-refunds)) |
 | POST | `/orders/:id/payment` 🔒 | **Pay again** after a failed/abandoned online payment → `{ payment: { provider, keyId, providerOrderId, amount, currency } }` (fresh gateway order). `400 PAYMENT_NOT_RETRYABLE` unless it's your unpaid, non-cancelled upi/card/netbanking order |
 | PATCH | `/orders/:id/payment-method` 🔒 | `{ paymentMethod: "cod" }` — give up on online payment and pay cash on delivery (only while pending/failed). `400 PAYMENT_METHOD_NOT_CHANGEABLE` otherwise |
 | POST | `/orders/:id/reorder` 🔒 | **Buy again**: adds the order's items to your cart at today's prices, capped by stock → `{ cart, skipped: [{ productId, title, reason: inactive \| out_of_stock \| qty_reduced, requested, added }] }` |
 | POST | `/payments/verify` 🔒 | After Razorpay checkout succeeds: `{ orderId, razorpay_payment_id, razorpay_signature }` → signature verified, `paymentStatus = paid` |
-| POST | `/payments/webhook` | Razorpay payment webhook (raw body, HMAC signature verified) |
+| POST | `/payments/webhook` | Razorpay webhook (raw body, HMAC signature verified): payment events and `refund.processed` / `refund.failed` |
 
 ### Admin (👑 `role: admin`)
 
@@ -165,21 +185,22 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | GET | `/admin/stats` | Dashboard: `todayOrders`, `todayRevenue` (paise), `pendingOrders`, `outForDelivery`, `lowStockCount` (variant products: any active variant low), `totalCustomers`, `pendingReviews` ("today" = IST day) |
 | GET | `/admin/orders?page&limit&status&from&to&q` | All orders; `q` = orderNumber or customer mobile; `from`/`to` = `YYYY-MM-DD` (whole IST day, inclusive) or ISO datetime; `user` populated as `{ id, name, mobile }` |
 | GET | `/admin/orders/:id` | One order + full customer card |
-| PATCH | `/admin/orders/:id/status` | Transition order status |
+| PATCH | `/admin/orders/:id/status` | Transition order status. `cancelled` does everything a customer cancel does (stock, coupon, refund) and is idempotent; a cancelled order cannot be re-opened |
+| POST | `/admin/orders/:id/refund` | `{ amount?, reason }` partial / full refund of a paid online order (`amount` in paise, default = everything left; `400 REFUND_AMOUNT_EXCEEDED` with `details.maxRefundable`) → the order with `refunds[]` |
 | GET | `/admin/users?page&limit&q` | Customers with `ordersCount` |
 | GET | `/admin/products?page&limit&q&category&isActive&lowStock` | Products incl. inactive (soft-deleted can be re-activated with `PATCH { isActive: true }`) |
 | POST/PATCH/DELETE | `/admin/products`, `/admin/products/:id` | Product CRUD (DELETE = soft). POST / PATCH take `optionName` + `variants` — see [Product variants](#product-variants) |
 | GET | `/admin/categories`, `/admin/banners` | All rows incl. inactive |
 | POST/PATCH/DELETE | `/admin/categories`, `/admin/categories/:id` | Category CRUD |
-| GET/POST/PATCH/DELETE | `/admin/coupons`, `/admin/coupons/:id` | Coupon CRUD |
+| GET/POST/PATCH/DELETE | `/admin/coupons`, `/admin/coupons/:id` | Coupon CRUD; optional `description { en, hi }` (shown on the Offers screen) |
 | POST/PATCH/DELETE | `/admin/banners`, `/admin/banners/:id` | Banner CRUD |
 | GET/PATCH | `/admin/settings` | Delivery fee, free-delivery threshold, handling fee, min order value, store open/closed, timings |
-| GET/POST/PATCH/DELETE | `/admin/pincodes`, `/admin/pincodes/:id` | Serviceable areas `{ pincode, areaName{en,hi}, isActive, deliveryFee?, etaDays }` (DELETE = hard) |
+| GET/POST/PATCH/DELETE | `/admin/pincodes`, `/admin/pincodes/:id` | Serviceable areas `{ pincode, areaName{en,hi}, isActive, deliveryFee?, etaDays, etaMinutes? }` (`etaMinutes` 5–1440 = quick-delivery area; DELETE = hard) |
 | POST | `/admin/uploads` | Upload images (multipart field `images`, max 6, 5 MB each, jpeg/png/webp/avif) → `201 { data: { urls: ["https://res.cloudinary.com/..."] } }` |
 | GET | `/admin/orders/latest?since=<ISO datetime>` | New-order alert for polling: `{ count, orders: [{ id, orderNumber, total, createdAt }] }` (newest 10; `since` is exclusive, needs a zone) |
 | PATCH | `/admin/orders/:id/assign` | `{ riderId }` (or `null` to unassign) → order with `rider { id, name, mobile }`. The order never exposes `deliveryOtp` here |
-| GET/POST | `/admin/riders` | List / create delivery riders `{ name, mobile, isActive }` (`activeOrders` count included). Riders sign in with the normal OTP flow |
-| PATCH | `/admin/riders/:id` | Change `name`, `mobile`, `isActive` (inactive = cannot log in, tokens stop working) |
+| GET/POST | `/admin/riders` | List / create delivery riders. Create: `{ name, mobile, username, password }` (the mobile is kept for calls and push; `409 USERNAME_TAKEN`). The list shows `username` (never a hash) and `activeOrders` |
+| PATCH | `/admin/riders/:id` | Change `name`, `mobile`, `username`, `isActive` (inactive = cannot log in, tokens stop working) or **reset the `password`** (all of that rider's sessions end) |
 | GET | `/admin/reports/sales?from&to&groupBy=day\|week\|month` | `[{ period, orders, revenue, avgOrderValue }]` (IST periods; week = Monday date; default last 30 days) |
 | GET | `/admin/reports/top-products?from&to&limit=10` | `[{ productId, variantId, variantLabel, title, qtySold, revenue }]` — one row per variant (`null` for plain products) |
 | GET | `/admin/reports/cod?date=YYYY-MM-DD` | Cash reconciliation: `{ totalExpected, totalCollected, byRider: [{ rider, orders, expected, collected }] }` |
@@ -225,6 +246,12 @@ Same item, different options (Aata 1 kg / 5 kg / 10 kg). A product either sells 
 
 New reviews are `pending`; only `approved` reviews are listed publicly and counted in `ratingAvg` / `ratingCount` (recomputed on approve / reject / delete). Admins moderate with `GET /admin/reviews?status=pending` and `PATCH /admin/reviews/:id/status`; `GET /admin/stats` has `pendingReviews`. A customer still has one review per product, whatever its status. **Reviews that existed before moderation are marked `approved` automatically** at server start (`src/migrations`, idempotent) or with `npm run migrate` — run one of them once on an existing database, otherwise old reviews would stay hidden.
 
+#### Cancellation and refunds
+
+Customer cancel and admin `PATCH .../status { status: "cancelled" }` share one transaction: the order is claimed atomically (so cancelling twice, or at the same moment, restores stock **once**), stock returns to the **same variant**, and the coupon redemption is given back (`usedCount` − 1, the user's per-user limit is free again). A cancelled order cannot be re-opened.
+
+A **paid online** order that is cancelled gets a Razorpay refund for everything still refundable. `Order` carries `refundStatus` (`null` / `pending` / `processed` / `failed`), `refundId`, `refundedAmount`, `refundedAt` and `refunds[]`; `paymentStatus` becomes `refunded` **only when processed refunds cover the whole paid amount**. A gateway failure never undoes the cancel: the refund is `failed` and an admin retries with `POST /admin/orders/:id/refund`. The mock provider processes refunds immediately; Razorpay answers `pending` and the `refund.processed` / `refund.failed` webhook (idempotent) finishes it. Partial refunds (an item was missing) use the same endpoint and can never add up to more than was paid — they leave the order `paid`, and revenue reports still count it in full. Paid **COD** orders are only marked `refunded` (the shop returns the cash by hand). A payment that arrives after the order was cancelled is logged so it can be refunded by hand.
+
 #### Store settings & serviceable areas — behaviour worth knowing
 
 - **Settings** live in one DB document (created from the `DEFAULT_*` env values on first read). Cart totals and checkout read it on every request, so changes apply immediately. `storeOpen = false` → `POST /orders` returns `503 STORE_CLOSED` (retries of an already-placed order via the same `Idempotency-Key` still succeed). `minOrderValue` is checked against the pre-discount subtotal (`400 MIN_ORDER_VALUE`). `storeTimings` is display-only.
@@ -245,7 +272,7 @@ New reviews are `pending`; only `approved` reviews are listed publicly and count
 
 Every error response is `{ success: false, data: null, error: { code, message, details? } }`. Stable codes (non-exhaustive — see `src/utils/errorCodes.js` for the full list) so the client can render the right bilingual copy:
 
-`OTP_EXPIRED`, `OTP_INVALID`, `OTP_MAX_ATTEMPTS`, `OTP_SEND_RATE_LIMITED`, `TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, `VALIDATION_ERROR`, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `COUPON_NOT_FOUND`, `COUPON_EXPIRED`, `COUPON_MIN_ORDER`, `COUPON_USAGE_LIMIT_REACHED`, `COUPON_PER_USER_LIMIT_REACHED`, `ADDRESS_NOT_FOUND`, `ORDER_NOT_FOUND`, `ORDER_NOT_CANCELLABLE`, `IDEMPOTENCY_KEY_REQUIRED`, `REVIEW_REQUIRES_DELIVERED_ORDER`, `REVIEW_ALREADY_EXISTS`, `PAYMENT_SIGNATURE_INVALID`, `FORBIDDEN`, `RATE_LIMITED`, `STORE_CLOSED`, `MIN_ORDER_VALUE`, `NOT_SERVICEABLE`, `PINCODE_NOT_FOUND`, `PAYMENT_NOT_REQUIRED`, `ORDER_NOT_PAYABLE`, `PAYMENT_PROVIDER_ERROR`, `PAYMENT_NOT_RETRYABLE`, `PAYMENT_METHOD_NOT_CHANGEABLE`, `INVALID_DELIVERY_OTP`, `DELIVERY_OTP_LOCKED`, `INVALID_ORDER_STATE`, `ORDER_NOT_ASSIGNABLE`, `RIDER_NOT_FOUND`, `MOBILE_ALREADY_REGISTERED`, `ACCOUNT_DISABLED`, `REVIEW_NOT_FOUND`, `VARIANT_REQUIRED`, `VARIANT_NOT_FOUND`, `PUSH_NOT_CONFIGURED`, `UPLOAD_FAILED`, `FILE_TOO_LARGE`.
+`OTP_EXPIRED`, `OTP_INVALID`, `OTP_MAX_ATTEMPTS`, `OTP_SEND_RATE_LIMITED`, `TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, `VALIDATION_ERROR`, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `COUPON_NOT_FOUND`, `COUPON_EXPIRED`, `COUPON_MIN_ORDER`, `COUPON_USAGE_LIMIT_REACHED`, `COUPON_PER_USER_LIMIT_REACHED`, `ADDRESS_NOT_FOUND`, `ORDER_NOT_FOUND`, `ORDER_NOT_CANCELLABLE`, `IDEMPOTENCY_KEY_REQUIRED`, `REVIEW_REQUIRES_DELIVERED_ORDER`, `REVIEW_ALREADY_EXISTS`, `PAYMENT_SIGNATURE_INVALID`, `FORBIDDEN`, `RATE_LIMITED`, `STORE_CLOSED`, `MIN_ORDER_VALUE`, `NOT_SERVICEABLE`, `PINCODE_NOT_FOUND`, `PAYMENT_NOT_REQUIRED`, `ORDER_NOT_PAYABLE`, `PAYMENT_PROVIDER_ERROR`, `PAYMENT_NOT_RETRYABLE`, `PAYMENT_METHOD_NOT_CHANGEABLE`, `INVALID_DELIVERY_OTP`, `DELIVERY_OTP_LOCKED`, `INVALID_ORDER_STATE`, `ORDER_NOT_ASSIGNABLE`, `RIDER_NOT_FOUND`, `MOBILE_ALREADY_REGISTERED`, `ACCOUNT_DISABLED`, `REVIEW_NOT_FOUND`, `VARIANT_REQUIRED`, `VARIANT_NOT_FOUND`, `PUSH_NOT_CONFIGURED`, `UPLOAD_FAILED`, `FILE_TOO_LARGE`, `INVALID_CREDENTIALS`, `ACCOUNT_LOCKED`, `USE_PASSWORD_LOGIN`, `USERNAME_TAKEN`, `INVALID_CURRENT_PASSWORD`, `GEO_NOT_FOUND`, `GEO_NOT_CONFIGURED`, `GEO_PROVIDER_ERROR`, `REFUND_NOT_ALLOWED`, `REFUND_AMOUNT_EXCEEDED`, `REFUND_PROVIDER_ERROR`.
 
 ## API spec
 

@@ -8,6 +8,7 @@ import { containsRegex } from '../utils/regex.js';
 import { paginateQuery } from '../utils/mongoosePlugins.js';
 import { generateDeliveryOtp } from '../utils/generators.js';
 import { notifyOrderStatusChange, notifyRiderAssigned, notifyRiderUnassigned } from './push.service.js';
+import { assertUsernameFree, hashPassword, mapUsernameDuplicate, setPassword } from './staff-auth.service.js';
 
 const ACTIVE_DELIVERY_STATUSES = ['confirmed', 'packed', 'shipped', 'out_for_delivery'];
 const CUSTOMER_CARD = { path: 'user', select: 'name mobile' };
@@ -18,6 +19,7 @@ const serializeRider = (u, activeOrders = 0) => ({
   id: u.id,
   name: u.name,
   mobile: u.mobile,
+  username: u.username ?? null, // null for a rider created before username login existed: set one with PATCH
   isActive: u.isActive,
   activeOrders,
   createdAt: u.createdAt,
@@ -36,31 +38,62 @@ export async function listRiders({ page, limit, q, isActive }) {
   if (isActive !== undefined) filter.isActive = isActive;
   if (q) {
     const rx = containsRegex(q);
-    filter.$or = [{ name: rx }, { mobile: rx }];
+    filter.$or = [{ name: rx }, { mobile: rx }, { username: rx }];
   }
-  const result = await paginateQuery(User, filter, { page, limit, sort: { createdAt: -1 }, select: 'name mobile isActive createdAt' });
+  const result = await paginateQuery(User, filter, { page, limit, sort: { createdAt: -1 }, select: 'name mobile username isActive createdAt' });
   const counts = await activeOrderCounts(result.docs.map((u) => u._id));
   return { ...result, docs: result.docs.map((u) => serializeRider(u, counts.get(u.id) ?? 0)) };
 }
 
-/** Riders log in through the normal OTP flow with this mobile, so the mobile must not already belong to anyone. */
-export async function createRider({ name, mobile, isActive }) {
+/**
+ * Riders sign in with username + password (POST /auth/staff/login). The mobile is kept for calls and push, and must not
+ * belong to anyone else (a customer account cannot be turned into a rider).
+ */
+export async function createRider({ name, mobile, username, password, isActive }) {
   if (await User.exists({ mobile })) {
     throw ApiError.conflict(ErrorCodes.MOBILE_ALREADY_REGISTERED, 'This mobile number is already registered');
   }
-  const rider = await User.create({ name, mobile, role: 'rider', isVerified: true, isActive });
-  return serializeRider(rider, 0);
+  await assertUsernameFree(username);
+  try {
+    const rider = await User.create({
+      name,
+      mobile,
+      username,
+      passwordHash: await hashPassword(password),
+      passwordChangedAt: new Date(),
+      role: 'rider',
+      isVerified: true,
+      isActive,
+    });
+    return serializeRider(rider, 0);
+  } catch (err) {
+    throw mapUsernameDuplicate(err);
+  }
 }
 
 export async function updateRider(id, patch) {
   const rider = await User.findOne({ _id: id, role: 'rider' });
   if (!rider) throw ApiError.notFound(ErrorCodes.RIDER_NOT_FOUND, 'Rider not found');
 
-  if (patch.mobile && patch.mobile !== rider.mobile && (await User.exists({ mobile: patch.mobile }))) {
+  const { password, ...fields } = patch;
+  if (fields.mobile && fields.mobile !== rider.mobile && (await User.exists({ mobile: fields.mobile }))) {
     throw ApiError.conflict(ErrorCodes.MOBILE_ALREADY_REGISTERED, 'This mobile number is already registered');
   }
-  Object.assign(rider, patch);
-  await rider.save();
+  if (fields.username && fields.username !== rider.username) await assertUsernameFree(fields.username, rider._id);
+  if (password && !(fields.username ?? rider.username)) {
+    // a rider from before username login has none yet: it must be given together with the password
+    throw ApiError.badRequest(ErrorCodes.VALIDATION_ERROR, 'Request validation failed', [
+      { path: 'username', message: 'This rider has no username yet: send one together with the password' },
+    ]);
+  }
+
+  Object.assign(rider, fields);
+  try {
+    if (password) await setPassword(rider, password); // saves; also ends all of this rider's sessions
+    else await rider.save();
+  } catch (err) {
+    throw mapUsernameDuplicate(err);
+  }
   const counts = await activeOrderCounts([rider._id]);
   return serializeRider(rider, counts.get(rider.id) ?? 0);
 }

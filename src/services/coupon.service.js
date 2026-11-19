@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Coupon } from '../models/Coupon.js';
 import { CouponRedemption } from '../models/CouponRedemption.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -70,4 +71,42 @@ export async function recordCouponRedemption(coupon, { userId, orderId, session 
 
 export function previewDiscount(coupon, subtotal) {
   return computeCouponDiscount(coupon, subtotal);
+}
+
+/**
+ * Coupons a customer could use right now, for the "Offers" screen: active, inside their dates, global usage limit not
+ * exhausted. With a `userId`, coupons whose per-user limit that user has already used up are left out too.
+ * (`minOrderValue` is NOT filtered: it is shown so the app can say "add Rs 50 more".)
+ * @returns {Promise<{ code, type, value, minOrderValue, maxDiscount, expiresAt, description }[]>} soonest-expiring first
+ */
+export async function listAvailableCoupons(userId = null) {
+  const now = new Date();
+  const candidates = await Coupon.find({
+    isActive: true,
+    startsAt: { $lte: now },
+    expiresAt: { $gte: now },
+    perUserLimit: { $ne: 0 }, // 0 uses per user = nobody can ever apply it
+    $or: [{ usageLimit: null }, { $expr: { $lt: ['$usedCount', '$usageLimit'] } }],
+  }).sort({ expiresAt: 1, code: 1 });
+
+  let usedByUser = new Map();
+  if (userId && candidates.length) {
+    const rows = await CouponRedemption.aggregate([
+      { $match: { user: new mongoose.Types.ObjectId(userId), coupon: { $in: candidates.map((c) => c._id) } } },
+      { $group: { _id: '$coupon', used: { $sum: 1 } } },
+    ]);
+    usedByUser = new Map(rows.map((r) => [r._id.toString(), r.used]));
+  }
+
+  return candidates
+    .filter((c) => c.perUserLimit == null || (usedByUser.get(c.id) ?? 0) < c.perUserLimit)
+    .map((c) => ({
+      code: c.code,
+      type: c.type,
+      value: c.value,
+      minOrderValue: c.minOrderValue,
+      maxDiscount: c.maxDiscount,
+      expiresAt: c.expiresAt,
+      description: c.description ? { en: c.description.en, hi: c.description.hi } : null,
+    }));
 }

@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "9f2b6f1a-2b3a-4c1d-9e3a-aali-market-api",
     "name": "Aali Market API",
-    "description": "Price-first mobile shopping API for small-town India. All money is integer paise. Bilingual fields are { en, hi }. Every response is { success, data, error }.\n\nFlow to try this collection end to end:\n1. Auth > Send OTP, check the server console for the printed code (SMS_PROVIDER=console in dev), then Auth > Verify OTP (auto-saves accessToken/refreshToken).\n2. Catalog > List Categories / List Products (auto-saves categoryId/productId/productSlug).\n3. Cart > Add Item, Apply Coupon (code AALI50, needs subtotal >= ₹199).\n4. Addresses > Create Address (auto-saves addressId).\n5. Orders > Create Order (auto-saves orderId) — Idempotency-Key header uses the {{$guid}} dynamic variable, so re-sending the exact same request body+key replays the same order.\n6. Admin folder uses its own adminAccessToken — Send/Verify OTP with the seeded admin mobile (9999999999 by default).\n\nNew in this version: Catalog > Suggest Products / Store Settings, Orders > Create Order (UPI), Payments > Verify Payment, and Admin > Dashboard, Orders, Settings, Pincodes, plus inactive-inclusive product/category/banner lists.\n\nAlso in this version: Orders > Pay Again / Switch Payment to COD / Reorder, Push (PWA), Rider (login + deliver with OTP), and Admin > Riders, Reports, Reviews, bulk/CSV product tools, Assign Rider, Latest Orders, Update Store Info.\n\nAlso in this version: product variants (Admin > Products > Create Product (with variants) / Update Product Variants / Bulk Update (variant rows); Cart > Add Item (variant) ...; Catalog > Get Product (with variants)), review approval (Catalog > My Review of a Product; Admin > Reviews > Approve / Reject), and rider push notifications (Rider > Rider - Subscribe to Push).",
+    "description": "Price-first mobile shopping API for small-town India. All money is integer paise. Bilingual fields are { en, hi }. Every response is { success, data, error }.\n\nFlow to try this collection end to end:\n1. Auth > Send OTP, check the server console for the printed code (SMS_PROVIDER=console in dev), then Auth > Verify OTP (auto-saves accessToken/refreshToken).\n2. Catalog > List Categories / List Products (auto-saves categoryId/productId/productSlug).\n3. Cart > Add Item, Apply Coupon (code AALI50, needs subtotal >= ₹199).\n4. Addresses > Create Address (auto-saves addressId).\n5. Orders > Create Order (auto-saves orderId) — Idempotency-Key header uses the {{$guid}} dynamic variable, so re-sending the exact same request body+key replays the same order.\n6. Admin folder uses its own adminAccessToken — Send/Verify OTP with the seeded admin mobile (9999999999 by default).\n\nNew in this version: Catalog > Suggest Products / Store Settings, Orders > Create Order (UPI), Payments > Verify Payment, and Admin > Dashboard, Orders, Settings, Pincodes, plus inactive-inclusive product/category/banner lists.\n\nAlso in this version: Orders > Pay Again / Switch Payment to COD / Reorder, Push (PWA), Rider (login + deliver with OTP), and Admin > Riders, Reports, Reviews, bulk/CSV product tools, Assign Rider, Latest Orders, Update Store Info.\n\nAlso in this version: product variants (Admin > Products > Create Product (with variants) / Update Product Variants / Bulk Update (variant rows); Cart > Add Item (variant) ...; Catalog > Get Product (with variants)), review approval (Catalog > My Review of a Product; Admin > Reviews > Approve / Reject), and rider push notifications (Rider > Rider - Subscribe to Push).\n\nAlso in this version: admin + rider sign in with username + password (Admin - Login, Rider - Login, Auth > Change Password, Admin > Riders > Reset Rider Password), Catalog > Reverse Geocode / Available Offers, quick-delivery pincodes (etaMinutes), Admin > Orders > Refund Order.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -175,6 +175,31 @@
       "key": "variantId2",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "adminUsername",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "riderUsername",
+      "value": "ramesh.kumar",
+      "type": "string"
+    },
+    {
+      "key": "riderPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "newPassword",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -211,7 +236,7 @@
                 "send"
               ]
             },
-            "description": "Rate-limited to 3 sends / 15 min / mobile. In dev (SMS_PROVIDER=console) the code is printed to the server console, not sent via SMS."
+            "description": "CUSTOMERS only. 403 USE_PASSWORD_LOGIN for an admin / rider mobile (nothing is sent). The response contains `code` only in local development (NODE_ENV != production and SMS_PROVIDER=console)."
           }
         },
         {
@@ -404,6 +429,62 @@
               ]
             }
           }
+        },
+        {
+          "name": "Change Password (admin / rider)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "password"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"currentPassword\":\"{{adminPassword}}\",\"newPassword\":\"{{newPassword}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminAccessToken}}"
+                }
+              ]
+            },
+            "description": "Staff only. New password: min 8 characters with a letter and a number. Every other session is signed out; the response is a fresh { accessToken, refreshToken, passwordChangedAt } for this session (saved to adminAccessToken / adminRefreshToken — then update adminPassword). Uses the admin token; for a rider send the rider token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  var d = pm.response.json().data;",
+                  "  pm.collectionVariables.set('adminAccessToken', d.accessToken);",
+                  "  pm.collectionVariables.set('adminRefreshToken', d.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -751,6 +832,64 @@
               }
             }
           ]
+        },
+        {
+          "name": "Reverse Geocode (location -> area + pincode)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/geo/reverse?lat=28.6139&lng=77.2090",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "geo",
+                "reverse"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "28.6139"
+                },
+                {
+                  "key": "lng",
+                  "value": "77.2090"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Public. -> { pincode, area, city, state } for \"Delivering to G Block, Sector 63\". India only: 404 GEO_NOT_FOUND otherwise. Cached 24 h per 3-decimal cell; per-IP rate limit."
+          }
+        },
+        {
+          "name": "Available Offers (coupons)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/coupons/available",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "coupons",
+                "available"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "Public; send the customer token to also remove coupons this user has used up. -> [{ code, type, value, minOrderValue, maxDiscount, expiresAt, description {en,hi} | null }]."
+          }
         }
       ]
     },
@@ -1544,7 +1683,7 @@
                 "cancel"
               ]
             },
-            "description": "Only while status is placed/confirmed/packed — otherwise ORDER_NOT_CANCELLABLE."
+            "description": "Only while status is placed/confirmed/packed — otherwise ORDER_NOT_CANCELLABLE. A paid online order is refunded: refundStatus pending -> processed (the mock gateway is instant; Razorpay finishes through the refund.processed webhook)."
           }
         },
         {
@@ -1827,7 +1966,7 @@
       "name": "Admin",
       "item": [
         {
-          "name": "Admin - Send OTP",
+          "name": "Admin - Login (username + password)",
           "request": {
             "method": "POST",
             "header": [
@@ -1836,76 +1975,46 @@
                 "value": "application/json"
               }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/staff/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "staff",
+                "login"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\"mobile\":\"{{adminMobile}}\",\"purpose\":\"login\"}",
+              "raw": "{\"username\":\"{{adminUsername}}\",\"password\":\"{{adminPassword}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "url": {
-              "raw": "{{baseUrl}}/auth/otp/send",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "otp",
-                "send"
-              ]
+            "auth": {
+              "type": "noauth"
             },
-            "description": "adminMobile defaults to 9999999999 (SEED_ADMIN_MOBILE) — must already exist via `npm run seed`."
-          }
-        },
-        {
-          "name": "Admin - Verify OTP",
+            "description": "Admins sign in with username + password (the OTP endpoints answer 403 USE_PASSWORD_LOGIN for an admin mobile). Set adminUsername / adminPassword in the environment (the seed uses SEED_ADMIN_USERNAME / SEED_ADMIN_PASSWORD; there is no default password). Saves adminAccessToken / adminRefreshToken. Wrong password, unknown username and customers all give the same 401 INVALID_CREDENTIALS; 5 wrong passwords lock the account for 15 minutes (429 ACCOUNT_LOCKED, details.retryAfterSeconds)."
+          },
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if ([200, 201].includes(pm.response.code)) {",
-                  "  var json = pm.response.json();",
-                  "  pm.collectionVariables.set('adminAccessToken', json.data.accessToken);",
-                  "  pm.collectionVariables.set('adminRefreshToken', json.data.refreshToken);",
+                  "if (pm.response.code === 200) {",
+                  "  var d = pm.response.json().data;",
+                  "  pm.collectionVariables.set('adminAccessToken', d.accessToken);",
+                  "  pm.collectionVariables.set('adminRefreshToken', d.refreshToken);",
                   "}"
                 ]
               }
             }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\"mobile\":\"{{adminMobile}}\",\"code\":\"{{adminOtpCode}}\",\"purpose\":\"login\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/auth/otp/verify",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "otp",
-                "verify"
-              ]
-            },
-            "description": "Set {{adminOtpCode}} from the server console before sending."
-          }
+          ]
         },
         {
           "name": "Products",
@@ -2607,7 +2716,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\"code\":\"TESTPCT10\",\"type\":\"percent\",\"value\":10,\"minOrderValue\":9900,\"maxDiscount\":10000,\"startsAt\":\"{{nowIso}}\",\"expiresAt\":\"{{expiresIso}}\",\"usageLimit\":100,\"perUserLimit\":1,\"isActive\":true}",
+                  "raw": "{\"code\":\"TESTPCT10\",\"type\":\"percent\",\"value\":10,\"minOrderValue\":9900,\"maxDiscount\":10000,\"startsAt\":\"{{nowIso}}\",\"expiresAt\":\"{{expiresIso}}\",\"usageLimit\":100,\"perUserLimit\":1,\"isActive\":true,\"description\":{\"en\":\"Flat Rs 50 off on orders above Rs 199\",\"hi\":\"199 रुपये से ऊपर के ऑर्डर पर 50 रुपये की छूट\"}}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -2624,7 +2733,7 @@
                     "coupons"
                   ]
                 },
-                "description": "type: flat (value = paise off) | percent (value = whole % , capped by maxDiscount paise)."
+                "description": "type: flat (value = paise off) | percent (value = whole % , capped by maxDiscount paise). Optional description { en, hi } is shown on the Offers screen (GET /coupons/available). PATCH with description:null removes it."
               }
             },
             {
@@ -3092,7 +3201,7 @@
                     "status"
                   ]
                 },
-                "description": "status: placed | confirmed | packed | shipped | out_for_delivery | delivered | cancelled"
+                "description": "status: placed | confirmed | packed | shipped | out_for_delivery | delivered | cancelled status \"cancelled\" does everything a customer cancel does, idempotently: stock returns to the same variant, the coupon redemption is given back, and a paid ONLINE order is refunded. A cancelled order cannot be re-opened (400 INVALID_ORDER_STATE)."
               }
             },
             {
@@ -3170,6 +3279,49 @@
                   ]
                 },
                 "description": "Poll every few seconds with the newest createdAt you have seen (exclusive). → { count, orders: [{ id, orderNumber, total, createdAt }] } (newest 10). since must be an ISO datetime with a zone."
+              }
+            },
+            {
+              "name": "Refund Order (partial / full)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/orders/{{orderId}}/refund",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "orders",
+                    "{{orderId}}",
+                    "refund"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"amount\":3000,\"reason\":\"One item was missing\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Paid ONLINE orders only. amount (paise) is optional: omitted = everything still refundable. 400 REFUND_AMOUNT_EXCEEDED (details.maxRefundable) when it would exceed the paid amount (pending refunds count); 400 REFUND_NOT_ALLOWED for COD / unpaid / fully refunded orders; 502 REFUND_PROVIDER_ERROR when the gateway fails (retry). Returns the order with refundStatus, refundId, refundedAmount, refundedAt and refunds[]; paymentStatus becomes \"refunded\" only when processed refunds cover the whole amount."
               }
             }
           ]
@@ -3358,7 +3510,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\"pincode\":\"261201\",\"areaName\":{\"en\":\"Laharpur\",\"hi\":\"लहरपुर\"},\"isActive\":true,\"deliveryFee\":null,\"etaDays\":2}",
+                  "raw": "{\"pincode\":\"261201\",\"areaName\":{\"en\":\"Laharpur\",\"hi\":\"लहरपुर\"},\"isActive\":true,\"deliveryFee\":null,\"etaDays\":2,\"etaMinutes\":null}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3374,7 +3526,7 @@
                     }
                   ]
                 },
-                "description": "deliveryFee null = use the store delivery fee. Note: once ANY pincode exists, only active listed pincodes are serviceable."
+                "description": "deliveryFee null = use the store delivery fee. Note: once ANY pincode exists, only active listed pincodes are serviceable. etaMinutes (5-1440, null by default) marks a quick-delivery area: expectedDeliveryAt = order time + etaMinutes instead of etaDays, and GET /serviceability returns it."
               },
               "event": [
                 {
@@ -3456,6 +3608,47 @@
                 },
                 "description": "Hard delete."
               }
+            },
+            {
+              "name": "Create Quick-Delivery Pincode",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/pincodes",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "pincodes"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"pincode\":\"201301\",\"areaName\":{\"en\":\"Noida - Sector 63\",\"hi\":\"नोएडा - सेक्टर 63\"},\"isActive\":true,\"deliveryFee\":null,\"etaDays\":1,\"etaMinutes\":30}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "\"Delivering in 30 minutes\" area. Set etaMinutes back to null with Update Pincode to use etaDays again."
+              }
             }
           ]
         },
@@ -3530,7 +3723,7 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\"name\":\"Ramesh Kumar\",\"mobile\":\"{{riderMobile}}\",\"isActive\":true}",
+                  "raw": "{\"name\":\"Ramesh Kumar\",\"mobile\":\"{{riderMobile}}\",\"username\":\"{{riderUsername}}\",\"password\":\"{{riderPassword}}\",\"isActive\":true}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3546,7 +3739,7 @@
                     }
                   ]
                 },
-                "description": "The rider then logs in through the normal OTP flow. 409 MOBILE_ALREADY_REGISTERED if the mobile belongs to anyone."
+                "description": "The rider signs in with username + password (Rider > Rider - Login). The mobile is kept for calls and push and must not belong to anyone else (409 MOBILE_ALREADY_REGISTERED); 409 USERNAME_TAKEN. Password: min 8 characters with a letter and a number. Responses never contain a hash."
               },
               "event": [
                 {
@@ -3599,7 +3792,49 @@
                     }
                   ]
                 },
-                "description": "isActive:false blocks login and stops existing tokens working."
+                "description": "isActive:false blocks login and stops existing tokens working. Also accepts username and password: a password RESET ends all of that rider's sessions. A rider created before username login has username null: send a username together with the password."
+              }
+            },
+            {
+              "name": "Reset Rider Password",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/riders/{{riderId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "riders",
+                    "{{riderId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"password\":\"{{riderPassword}}\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Admin resets a rider's password: refresh tokens are revoked and tokens issued earlier stop working; a lock is cleared."
               }
             }
           ]
@@ -4044,7 +4279,7 @@
       "name": "Rider",
       "item": [
         {
-          "name": "Rider - Send OTP",
+          "name": "Rider - Login (username + password)",
           "request": {
             "method": "POST",
             "header": [
@@ -4054,59 +4289,29 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/otp/send",
+              "raw": "{{baseUrl}}/auth/staff/login",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "auth",
-                "otp",
-                "send"
+                "staff",
+                "login"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\"mobile\":\"{{riderMobile}}\",\"purpose\":\"login\"}",
+              "raw": "{\"username\":\"{{riderUsername}}\",\"password\":\"{{riderPassword}}\"}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "The rider must first be created by an admin (Admin > Riders > Create Rider). Same OTP flow as customers."
-          }
-        },
-        {
-          "name": "Rider - Verify OTP",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/auth/otp/verify",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "otp",
-                "verify"
-              ]
+            "auth": {
+              "type": "noauth"
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"mobile\":\"{{riderMobile}}\",\"code\":\"{{riderOtpCode}}\",\"purpose\":\"login\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "description": "Set {{riderOtpCode}} from the server console first. Saves riderAccessToken."
+            "description": "Riders sign in with the username + password an admin gave them (Admin > Riders > Create Rider). Saves riderAccessToken / riderRefreshToken."
           },
           "event": [
             {
@@ -4114,7 +4319,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "if ([200, 201].includes(pm.response.code)) {",
+                  "if (pm.response.code === 200) {",
                   "  var d = pm.response.json().data;",
                   "  pm.collectionVariables.set('riderAccessToken', d.accessToken);",
                   "  pm.collectionVariables.set('riderRefreshToken', d.refreshToken);",

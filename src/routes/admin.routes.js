@@ -42,6 +42,7 @@ import {
   orderIdParamSchema,
   assignRiderSchema,
   latestOrdersSchema,
+  refundOrderSchema,
 } from '../validations/order.validation.js';
 
 const router = Router();
@@ -96,6 +97,7 @@ router.get('/orders', validate(adminListOrdersSchema), orderController.adminList
 router.get('/orders/latest', validate(latestOrdersSchema), orderController.adminLatestOrders); // before '/orders/:id'
 router.get('/orders/:id', validate(orderIdParamSchema), orderController.adminGetOrder);
 router.patch('/orders/:id/assign', validate(assignRiderSchema), orderController.adminAssignRider);
+router.post('/orders/:id/refund', validate(refundOrderSchema), orderController.adminRefundOrder);
 router.patch('/orders/:id/status', validate(updateOrderStatusSchema), orderController.adminUpdateOrderStatus);
 
 // Delivery riders (they log in through the normal OTP flow; role = rider)

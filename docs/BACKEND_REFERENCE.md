@@ -10,7 +10,7 @@ Everything below the overview is copied verbatim from the repo by `npm run refer
 | Base path | `API_BASE_PATH` env, default **/api/v1**. `/health` is at the server root. |
 | CORS | `cors({ origin: env.cors.origin })`; `CORS_ORIGIN` default `*`. One string only — a comma-separated list is **not** split into several origins. |
 | Uploaded images | No `/uploads` path, no static serving. `POST /admin/uploads` (multipart field `images`, max 6, 5 MB each) → Cloudinary (`STORAGE_PROVIDER=cloudinary`, default; `s3` still available) → `201 { success, data: { urls: ["https://res.cloudinary.com/<cloud>/image/upload/f_auto,q_auto/v<n>/aali-market/products/<id>"] }, error: null }`. Errors: `VALIDATION_ERROR`, `FILE_TOO_LARGE` (413), `UPLOAD_FAILED` (400/502/503). |
-| User roles | `User.role` ∈ `customer` \| `admin` \| `rider` (default `customer`) |
+| User roles | `User.role` ∈ `customer` \| `admin` \| `rider` (default `customer`). **Customers sign in with the OTP; admin and rider sign in with username + password** (`POST /auth/staff/login`) — the OTP endpoints answer 403 `USE_PASSWORD_LOGIN` for their mobiles. |
 | Admin check | `authenticate` verifies the JWT and loads the user from the DB each request; `requireRole('admin')` compares the DB role (not the token claim). |
 | Money | integer **paise** everywhere (₹1 = 100) |
 | Envelope | `{ success, data, error, meta? }`; errors `{ code, message, details? }` |
@@ -18,7 +18,9 @@ Everything below the overview is copied verbatim from the repo by `npm run refer
 ### Customer-facing endpoints
 
 ```
-POST /auth/otp/send            POST /auth/otp/verify        POST /auth/refresh       POST /auth/logout
+POST /auth/otp/send            POST /auth/otp/verify        POST /auth/refresh       POST /auth/logout      (customers: OTP)
+POST /auth/staff/login         PATCH /me/password           (admin + rider: username / password)
+GET  /geo/reverse?lat=&lng=    GET /coupons/available       (public; the coupons list takes an optional token)
 GET  /me                       PATCH /me
 GET  /categories               GET /banners                 GET /settings            (public)
 GET  /products                 GET /products/suggest?q=     GET /products/:slug      GET /products/:id/related
@@ -48,7 +50,7 @@ Prefix search for type-ahead, top 8 → `[{ id, slug, title:{en,hi}, price, imag
 
 ### Serviceable areas (`/admin/pincodes`, `GET /serviceability`)
 
-`{ pincode, areaName:{en,hi}, isActive, deliveryFee (paise|null), etaDays }`. **No pincodes configured → every pincode is served.** Once any exists, only active listed pincodes are serviceable and `POST /orders` rejects others with **400 `NOT_SERVICEABLE`**. `deliveryFee` overrides the store fee for that area (free threshold still applies); `etaDays` sets `expectedDeliveryAt`. `GET /cart?pincode=` previews the override.
+`{ pincode, areaName:{en,hi}, isActive, deliveryFee (paise|null), etaDays, etaMinutes (5–1440|null) }`. **No pincodes configured → every pincode is served.** Once any exists, only active listed pincodes are serviceable and `POST /orders` rejects others with **400 `NOT_SERVICEABLE`**. `deliveryFee` overrides the store fee for that area (free threshold still applies); `etaDays` sets `expectedDeliveryAt`. `etaMinutes` (5–1440, `null` by default) is for quick-delivery areas: when set, `expectedDeliveryAt` = order time + `etaMinutes` instead, and `GET /serviceability` returns it next to `etaDays`. `GET /cart?pincode=` previews the override.
 
 ### Online payments
 
@@ -62,7 +64,7 @@ Prefix search for type-ahead, top 8 → `[{ id, slug, title:{en,hi}, price, imag
 
 - `POST /orders` accepts `deliveryNote` (≤ 200 chars). Addresses accept an optional `location { lat, lng }` (copied into the order snapshot; `null` on PATCH clears it).
 - Every order gets a random 4-digit `deliveryOtp`. **Only the owner sees it** (`POST /orders`, `GET /orders/:id`); it is stripped from every other serialisation — admin, rider, push.
-- Admins manage riders (`/admin/riders`, `role: rider`, same OTP login) and assign orders (`PATCH /admin/orders/:id/assign { riderId | null }`).
+- Admins manage riders (`/admin/riders`, `role: rider`, username + password login) and assign orders (`PATCH /admin/orders/:id/assign { riderId | null }`).
 - Rider app (`/rider/*`, rider token only): `GET /orders` (mine only), `PATCH /orders/:id/out-for-delivery`, `POST /orders/:id/deliver { otp: "1234", cashCollected }`. Wrong OTP = 400 `INVALID_DELIVERY_OTP` (`details.attemptsLeft`); after `DELIVERY_OTP_MAX_ATTEMPTS` (5) wrong tries = 429 `DELIVERY_OTP_LOCKED`. Unpaid COD needs `cashCollected` (paise) and becomes paid.
 
 ### Payment retry, COD switch, reorder
@@ -92,24 +94,53 @@ A product either sells as before (no variants) or **only through its variants**.
 
 `Review.status` ∈ `pending` (default) | `approved` | `rejected`, plus `moderatedAt`, `moderationNote`. `POST /products/:id/reviews` returns the review as `pending` (it does not change the rating). `GET /products/:id/reviews` (public) lists **approved only** and never shows moderation fields. `ratingAvg`/`ratingCount` are computed from approved reviews and recomputed on approve / reject / delete. `GET /products/:id/reviews/mine` (auth) returns the caller's own review in any status (`status` only, never the admin's note) or `null`. Admin: `GET /admin/reviews?status=pending|approved|rejected` (default every status; + `productId`, `rating`), `PATCH /admin/reviews/:id/status { status: "approved" | "rejected", note? }` → `{ review, product: { id, ratingAvg, ratingCount } }` (can be changed again later), `GET /admin/stats` → `pendingReviews`. **Migration**: reviews from before moderation are set to `approved` automatically at server start (`src/migrations`, idempotent; also `npm run migrate`). A customer still has one review per product, whatever its status.
 
+### Staff login (admin + rider)
+
+`POST /auth/staff/login { username, password }` → `{ user, accessToken, refreshToken, isNewUser: false }` (same shape as `/auth/otp/verify`). `User` has `username` (unique, a–z 0–9 . _, 3–30, lower-cased), `passwordHash` (bcrypt cost 12, never returned), `passwordChangedAt`, `failedLoginAttempts` / `lockUntil` (private).
+- A wrong password, an unknown username and a **customer** account all answer the same **401 `INVALID_CREDENTIALS`** (and take the same time).
+- **5 wrong passwords lock the account for 15 minutes** → **429 `ACCOUNT_LOCKED`** with `details.retryAfterSeconds` (the 5th wrong try is the one that answers it; even the right password is refused until the lock ends). The counter is **atomic**: every attempt first reserves a slot with one conditional update, so parallel guesses never get more than 5 tries. A correct login resets it. Inactive account (after the password was right) → 403 `ACCOUNT_DISABLED`.
+- Rate limiters on top, counting only failed attempts: per IP (`STAFF_LOGIN_IP_LIMIT`, default 20 / 15 min) and per username (`STAFF_LOGIN_USER_LIMIT`, default 10 / 15 min) → 429 `RATE_LIMITED`.
+- `POST /auth/otp/send` and `/auth/otp/verify` for a mobile that belongs to an admin or rider → **403 `USE_PASSWORD_LOGIN`** (no OTP is generated or sent). The OTP `code` is echoed in the `/auth/otp/send` response **only when `NODE_ENV != production` and `SMS_PROVIDER=console`**.
+- `PATCH /me/password { currentPassword, newPassword }` (staff only; new password ≥ 8 chars with a letter and a number, ≤ 72 bytes, different from the old one; wrong current = 400 `INVALID_CURRENT_PASSWORD`, which also counts towards the lock). All refresh tokens are revoked and access tokens issued before the change stop working; the response is `{ accessToken, refreshToken, passwordChangedAt }` — a fresh pair for the current session.
+- **Riders**: `POST /admin/riders { name, mobile, username, password }` (the mobile stays — for calls and push); `PATCH /admin/riders/:id` also takes `username` / `password` (a reset ends that rider's sessions); `GET /admin/riders` shows `username` (null for riders created before this existed — give them one with PATCH); duplicate username = 409 `USERNAME_TAKEN`.
+- **Seed**: `SEED_ADMIN_USERNAME` (default `admin`) + `SEED_ADMIN_PASSWORD`. There is no default password: with `NODE_ENV=production` the seed refuses to run without it. The seed never overwrites an existing password.
+- **Recovery**: `npm run admin:set-password -- <username>` asks for the new password in the terminal (hidden). For an older admin without a username: `npm run admin:set-password -- <new-username> --mobile <their mobile>`. It clears a lock and signs the account out everywhere.
+
+### Location → area + pincode (`GET /geo/reverse`)
+
+Public. `?lat=&lng=` → `{ pincode, area, city, state }` — `area` is the mohalla / sector (e.g. "G Block, Sector 63") for "Delivering to …". India only: outside it, or with no pincode there → **404 `GEO_NOT_FOUND`**; provider trouble → 502 `GEO_PROVIDER_ERROR`; `GEO_PROVIDER=google` without `GOOGLE_MAPS_API_KEY` → 503 `GEO_NOT_CONFIGURED`. `GEO_PROVIDER` = `nominatim` (OpenStreetMap, free, default) or `google`. Nominatim's policy is followed: an identifying `GEO_USER_AGENT` (put a contact in it) and at most 1 request/second (outbound calls are queued and spaced). Coordinates are rounded to 3 decimals (~110 m) and answers are cached for 24 hours (also "nothing here"; provider errors are not cached). Per-IP rate limit `GEO_RATE_LIMIT_PER_MINUTE` (default 30).
+
+### Cancellation and refunds
+
+Every cancellation — customer `POST /orders/:id/cancel` **and** admin `PATCH /admin/orders/:id/status { status: "cancelled" }` — runs the same transaction: the order is **claimed atomically** (so it is idempotent: a second or simultaneous cancel changes nothing), stock goes back to the **same variant**, and the coupon redemption is given back (`usedCount` − 1, the user's per-user limit is free again). A cancelled order cannot be re-opened (400 `INVALID_ORDER_STATE`).
+
+**Refunds** (online-paid orders): `Order.refundStatus` (`null` | `pending` | `processed` | `failed`), `refundId`, `refundedAmount` (paise, processed only), `refundedAt`, plus `refunds[]` (one entry per refund: `refundId, amount, status, reason, source: cancel|admin|gateway, failureReason, createdAt, processedAt`) — all in `GET /orders/:id` and the admin order. Cancelling a **paid online** order (customer or admin) starts a Razorpay refund for everything still refundable; `paymentStatus` becomes `refunded` **only when processed refunds cover the whole paid amount**. A gateway failure never undoes the cancellation: the refund is marked `failed` and an admin retries with `POST /admin/orders/:id/refund`. The mock provider processes refunds at once; Razorpay answers `pending` and finishes through the **webhook** `refund.processed` / `refund.failed` (same signature as the payment webhook; idempotent; a refund made in the Razorpay dashboard is recorded as `source: gateway`).
+- `POST /admin/orders/:id/refund { amount?, reason }` — partial or full refund of a paid online order (`amount` in paise, default = everything still refundable). The amount is reserved with one conditional update, so refunds can never add up to more than was paid (pending refunds count): **400 `REFUND_AMOUNT_EXCEEDED`** (`details.maxRefundable`); COD / unpaid / fully refunded = 400 `REFUND_NOT_ALLOWED`; gateway error = 502 `REFUND_PROVIDER_ERROR`. Returns the order the way `GET /admin/orders/:id` does. A partial refund leaves the order `paid` (and still counted in revenue reports).
+- Cancelling a COD order that was already paid in cash only sets `paymentStatus: refunded` (the shop returns cash by hand). A payment that arrives for an already cancelled order is logged for manual refund.
+
+### Offers (`GET /coupons/available`)
+
+Public; with a token, coupons whose per-user limit that user has already used up are removed (an invalid token is 401, not a guest). Returns `[{ code, type, value, minOrderValue, maxDiscount, expiresAt, description: { en, hi } | null }]` of coupons that are active, inside their dates and not used up (`usageLimit`), soonest-expiring first. `minOrderValue` is shown, not filtered (the app can say "add ₹50 more"). `Coupon.description { en, hi }` is optional and set in `POST|PATCH /admin/coupons` (`null` removes it).
+
 ### Admin endpoints (`/admin/*`, admin token)
 
 | | |
 |---|---|
 | `GET /stats` | `{ todayOrders, todayRevenue, pendingOrders, outForDelivery, lowStockCount, totalCustomers, pendingReviews }` — "today" is the IST day (`STORE_UTC_OFFSET_MINUTES`); revenue excludes cancelled / payment-failed / refunded orders; low stock = active products at or below `LOW_STOCK_THRESHOLD` (variant products: any active variant); `pendingReviews` = reviews waiting for approval |
 | `GET /orders?page&limit&status&from&to&q` | all orders; `q` = orderNumber or customer mobile; `from`/`to` = `YYYY-MM-DD` (whole IST day, `to` inclusive) or ISO datetime; `user` populated `{ id, name, mobile }` |
-| `GET /orders/:id`, `PATCH /orders/:id/status` | full order + customer card; status transition |
+| `GET /orders/:id`, `PATCH /orders/:id/status` | full order + customer card; status transition. `cancelled` restores stock + coupon and refunds a paid online order (idempotent) |
 | `GET /users?page&limit&q` | customers: `{ id, name, mobile, email, isVerified, ordersCount, createdAt }` |
 | `GET /products?page&limit&q&category&isActive&lowStock` | incl. inactive (and inactive variants); `POST`, `PATCH /:id` (both take `optionName` + `variants`), `DELETE /:id` (soft; re-activate with `PATCH { isActive: true }`) |
 | `GET|POST /categories`, `PATCH|DELETE /categories/:id` | list includes inactive |
 | `GET|POST /banners`, `PATCH|DELETE /banners/:id` | list includes inactive |
-| `GET|POST /coupons`, `PATCH|DELETE /coupons/:id` | |
+| `GET|POST /coupons`, `PATCH|DELETE /coupons/:id` | optional `description { en, hi }` |
 | `GET|PATCH /settings` | see above |
-| `GET|POST /pincodes`, `PATCH|DELETE /pincodes/:id` | DELETE is a hard delete |
+| `GET|POST /pincodes`, `PATCH|DELETE /pincodes/:id` | `etaMinutes` (5–1440 or null) for quick-delivery areas; DELETE is a hard delete |
 | `POST /uploads` | multipart field `images` |
 | `GET /orders/latest?since=<ISO>` | new-order alert: `{ count, orders: [{ id, orderNumber, total, createdAt }] }` (newest 10; `since` exclusive) |
+| `POST /orders/:id/refund` | `{ amount?, reason }` partial / full refund of a paid online order → the order with `refunds[]` (see Cancellation and refunds) |
 | `PATCH /orders/:id/assign` | `{ riderId }` (null unassigns) → order with `rider { id, name, mobile }` |
-| `GET|POST /riders`, `PATCH /riders/:id` | delivery riders `{ name, mobile, isActive }` (+ `activeOrders`) |
+| `GET|POST /riders`, `PATCH /riders/:id` | delivery riders `{ name, mobile, username, isActive }` (+ `activeOrders`); create needs `username` + `password`, PATCH can reset them |
 | `GET /reports/sales?from&to&groupBy=day` (or week, month) | `[{ period, orders, revenue, avgOrderValue }]` |
 | `GET /reports/top-products?from&to&limit` | `[{ productId, variantId, variantLabel, title, qtySold, revenue }]` (one row per variant; variant fields `null` for plain products) |
 | `GET /reports/cod?date=YYYY-MM-DD` | `{ totalExpected, totalCollected, byRider: [{ rider, orders, expected, collected }] }` |
@@ -120,7 +151,7 @@ A product either sells as before (no variants) or **only through its variants**.
 | `PATCH /reviews/:id/status` | `{ status: "approved" \| "rejected", note? }` → `{ review, product: { id, ratingAvg, ratingCount } }` |
 | `DELETE /reviews/:id` | removes it; recalculates the product rating |
 
-Not available: promoting an existing customer to admin/rider (admins come from `npm run seed` or the DB; riders are created with `POST /admin/riders` for a NEW mobile).
+Not available: promoting an existing customer to admin/rider (admins come from `npm run seed` or the DB; riders are created with `POST /admin/riders` for a NEW mobile and username).
 
 ---
 
@@ -203,6 +234,7 @@ import {
   orderIdParamSchema,
   assignRiderSchema,
   latestOrdersSchema,
+  refundOrderSchema,
 } from '../validations/order.validation.js';
 
 const router = Router();
@@ -257,6 +289,7 @@ router.get('/orders', validate(adminListOrdersSchema), orderController.adminList
 router.get('/orders/latest', validate(latestOrdersSchema), orderController.adminLatestOrders); // before '/orders/:id'
 router.get('/orders/:id', validate(orderIdParamSchema), orderController.adminGetOrder);
 router.patch('/orders/:id/assign', validate(assignRiderSchema), orderController.adminAssignRider);
+router.post('/orders/:id/refund', validate(refundOrderSchema), orderController.adminRefundOrder);
 router.patch('/orders/:id/status', validate(updateOrderStatusSchema), orderController.adminUpdateOrderStatus);
 
 // Delivery riders (they log in through the normal OTP flow; role = rider)
@@ -286,24 +319,28 @@ export default router;
 import { Router } from 'express';
 import * as authController from '../controllers/auth.controller.js';
 import { validate } from '../middleware/validate.js';
-import { authenticate } from '../middleware/auth.js';
-import { otpSendLimiter, authLimiter } from '../middleware/rateLimit.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
+import { otpSendLimiter, authLimiter, staffLoginIpLimiter, staffLoginUserLimiter } from '../middleware/rateLimit.js';
 import {
   sendOtpSchema,
   verifyOtpSchema,
   refreshSchema,
   logoutSchema,
   updateMeSchema,
+  staffLoginSchema,
+  changePasswordSchema,
 } from '../validations/auth.validation.js';
 
 const router = Router();
 
 router.post('/auth/otp/send', otpSendLimiter, validate(sendOtpSchema), authController.sendOtp);
 router.post('/auth/otp/verify', authLimiter, validate(verifyOtpSchema), authController.verifyOtp);
+router.post('/auth/staff/login', staffLoginIpLimiter, staffLoginUserLimiter, validate(staffLoginSchema), authController.staffLogin);
 router.post('/auth/refresh', authLimiter, validate(refreshSchema), authController.refresh);
 router.post('/auth/logout', validate(logoutSchema), authController.logout);
 
 router.get('/me', authenticate, authController.getMe);
+router.patch('/me/password', authenticate, requireRole('admin', 'rider'), validate(changePasswordSchema), authController.changePassword);
 router.patch('/me', authenticate, validate(updateMeSchema), authController.updateMe);
 
 export default router;
@@ -375,6 +412,52 @@ router.post('/products/:id/reviews', authenticate, validate(createReviewSchema),
 export default router;
 ```
 
+### `src/routes/coupon.routes.js`
+
+```js
+import { Router } from 'express';
+import { validate } from '../middleware/validate.js';
+import { optionalAuthenticate } from '../middleware/auth.js';
+import { catchAsync } from '../utils/catchAsync.js';
+import { sendSuccess } from '../utils/ApiResponse.js';
+import { listAvailableCoupons } from '../services/coupon.service.js';
+import { availableCouponsSchema } from '../validations/coupon.validation.js';
+
+const router = Router();
+
+/**
+ * GET /coupons/available - public; with a token, coupons this user has already used up are left out.
+ * (A request with an invalid / expired token is answered 401 so the app can refresh it, not silently treated as a guest.)
+ */
+router.get(
+  '/available',
+  optionalAuthenticate,
+  validate(availableCouponsSchema),
+  catchAsync(async (req, res) => {
+    sendSuccess(res, { data: await listAvailableCoupons(req.user?.id ?? null) });
+  })
+);
+
+export default router;
+```
+
+### `src/routes/geo.routes.js`
+
+```js
+import { Router } from 'express';
+import { validate } from '../middleware/validate.js';
+import { geoLimiter } from '../middleware/rateLimit.js';
+import * as geoController from '../controllers/geo.controller.js';
+import { reverseGeocodeSchema } from '../validations/geo.validation.js';
+
+const router = Router();
+
+// Public (no login needed to see "Delivering to ..."), so it has its own per-IP limit.
+router.get('/reverse', geoLimiter, validate(reverseGeocodeSchema), geoController.reverse);
+
+export default router;
+```
+
 ### `src/routes/index.js`
 
 ```js
@@ -390,6 +473,8 @@ import wishlistRoutes from './wishlist.routes.js';
 import settingsRoutes from './settings.routes.js';
 import riderRoutes from './rider.routes.js';
 import pushRoutes from './push.routes.js';
+import geoRoutes from './geo.routes.js';
+import couponRoutes from './coupon.routes.js';
 
 const router = Router();
 
@@ -404,6 +489,8 @@ router.use('/admin', adminRoutes);
 router.use('/wishlist', wishlistRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/rider', riderRoutes);
+router.use('/geo', geoRoutes);
+router.use('/coupons', couponRoutes);
 
 export default router;
 ```
@@ -676,10 +763,13 @@ export const Category = mongoose.model('Category', categorySchema);
 ```js
 import mongoose from 'mongoose';
 import { toJSONPlugin } from '../utils/mongoosePlugins.js';
+import { bilingualSchema } from './shared/bilingual.js';
 
 const couponSchema = new mongoose.Schema(
   {
     code: { type: String, required: true, unique: true, uppercase: true, trim: true },
+    // Optional offer text for the "Offers" screen, e.g. { en: "Flat 50 off on orders above 199", hi: "..." }.
+    description: { type: bilingualSchema, default: undefined },
     type: { type: String, enum: ['flat', 'percent'], required: true },
     // flat -> paise; percent -> whole number percent (e.g. 10 = 10%)
     value: { type: Number, required: true, min: 0 },
@@ -781,6 +871,22 @@ const statusHistorySchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One refund of an online payment (see services/refund.service.js). The order-level refund fields summarise these.
+const refundSchema = new mongoose.Schema(
+  {
+    refundId: { type: String, default: null }, // the gateway's id (null until the gateway has answered)
+    amount: { type: Number, required: true, min: 1 }, // paise
+    status: { type: String, enum: ['pending', 'processed', 'failed'], default: 'pending' },
+    reason: { type: String, default: '' },
+    source: { type: String, enum: ['cancel', 'admin', 'gateway'], default: 'admin' }, // gateway = made outside this API
+    failureReason: { type: String, default: null },
+    createdAt: { type: Date, default: Date.now },
+    processedAt: { type: Date, default: null },
+  },
+  { _id: true }
+);
+toJSONPlugin(refundSchema);
+
 const orderSchema = new mongoose.Schema(
   {
     orderNumber: { type: String, required: true, unique: true },
@@ -806,6 +912,13 @@ const orderSchema = new mongoose.Schema(
     // Gateway payment id (e.g. Razorpay pay_xxx), set when payment is verified / captured.
     paymentId: { type: String, default: null },
     cancelReason: { type: String, default: null },
+    // Refund summary (recomputed from `refunds`): the status of the latest refund, its gateway id, the total refunded so
+    // far (processed only) and when. paymentStatus turns "refunded" only once processed refunds cover the whole amount.
+    refundStatus: { type: String, enum: ['pending', 'processed', 'failed', null], default: null },
+    refundId: { type: String, default: null },
+    refundedAmount: { type: Number, default: 0, min: 0 },
+    refundedAt: { type: Date, default: null },
+    refunds: { type: [refundSchema], default: [] },
     deliveryNote: { type: String, trim: true, maxlength: 200, default: '' },
     // 4-digit code the customer reads out to the rider. `private`: stripped from every serialisation; only the
     // customer-facing order endpoints add it back explicitly. Never shown to admin or rider APIs.
@@ -870,6 +983,8 @@ const pincodeSchema = new mongoose.Schema(
     // Paise. null => use the store-wide Setting.deliveryFee. (Free-delivery threshold still applies on top.)
     deliveryFee: { type: Number, default: null, min: 0 },
     etaDays: { type: Number, default: 2, min: 0, max: 30 },
+    // Quick-delivery areas ("30 minutes"). When set, expectedDeliveryAt = order time + etaMinutes instead of etaDays.
+    etaMinutes: { type: Number, default: null, min: 5, max: 1440, validate: { validator: (v) => v === null || Number.isInteger(v), message: 'etaMinutes must be a whole number' } },
   },
   { timestamps: true }
 );
@@ -1148,6 +1263,13 @@ const userSchema = new mongoose.Schema(
       match: /^[6-9]\d{9}$/,
     },
     name: { type: String, required: true, trim: true },
+    // Admin / rider only (customers sign in with an OTP). `sparse` so the many users without one don't collide.
+    username: { type: String, unique: true, sparse: true, lowercase: true, trim: true, minlength: 3, maxlength: 30, match: /^[a-z0-9._]+$/ },
+    passwordHash: { type: String, select: false, private: true },
+    passwordChangedAt: { type: Date },
+    // Login throttling (atomic counter; see staff-auth.service.js)
+    failedLoginAttempts: { type: Number, default: 0, private: true },
+    lockUntil: { type: Date, private: true },
     email: { type: String, trim: true, lowercase: true, default: undefined },
     role: { type: String, enum: ['customer', 'admin', 'rider'], default: 'customer' },
     addresses: { type: [addressSchema], default: [] },
@@ -1326,7 +1448,7 @@ export const adminListProductsSchema = {
 
 ```js
 import { z } from 'zod';
-import { mobileSchema } from '../utils/zodHelpers.js';
+import { mobileSchema, passwordSchema } from '../utils/zodHelpers.js';
 
 export const sendOtpSchema = {
   body: z
@@ -1369,6 +1491,26 @@ export const updateMeSchema = {
     .object({
       name: z.string().trim().min(1).max(80).optional(),
       email: z.string().trim().email().optional(),
+    })
+    .strict(),
+};
+
+// ---- staff (admin / rider) username + password
+export const staffLoginSchema = {
+  body: z
+    .object({
+      // Deliberately lenient: no format hints for an attacker, a wrong shape is simply "incorrect username or password".
+      username: z.string().trim().toLowerCase().min(1).max(64),
+      password: z.string().min(1).max(128),
+    })
+    .strict(),
+};
+
+export const changePasswordSchema = {
+  body: z
+    .object({
+      currentPassword: z.string().min(1).max(128),
+      newPassword: passwordSchema,
     })
     .strict(),
 };
@@ -1509,10 +1651,11 @@ export const categoryIdParamSchema = {
 
 ```js
 import { z } from 'zod';
-import { objectIdSchema, paiseSchema } from '../utils/zodHelpers.js';
+import { bilingualText, objectIdSchema, paiseSchema } from '../utils/zodHelpers.js';
 
 const couponBodyBase = {
   code: z.string().trim().toUpperCase().min(3).max(30),
+  description: bilingualText(1, 200).nullable().default(null),
   type: z.enum(['flat', 'percent']),
   value: z.number().int().min(1),
   minOrderValue: paiseSchema.default(0),
@@ -1539,6 +1682,7 @@ export const updateCouponSchema = {
   params: z.object({ id: objectIdSchema }).strict(),
   body: z
     .object({
+      description: bilingualText(1, 200).nullable().optional(), // null removes it
       type: z.enum(['flat', 'percent']).optional(),
       value: z.number().int().min(1).optional(),
       minOrderValue: paiseSchema.optional(),
@@ -1554,6 +1698,29 @@ export const updateCouponSchema = {
 
 export const couponIdParamSchema = {
   params: z.object({ id: objectIdSchema }).strict(),
+};
+
+// GET /coupons/available takes no parameters.
+export const availableCouponsSchema = {
+  query: z.object({}).strict(),
+};
+```
+
+### `src/validations/geo.validation.js`
+
+```js
+import { z } from 'zod';
+
+// Plain decimal strings only: z.coerce.number() would turn an empty "?lat=" into 0.
+const coordinate = (min, max) =>
+  z
+    .string()
+    .regex(/^-?\d{1,3}(\.\d+)?$/, 'Must be a decimal number')
+    .transform(Number)
+    .pipe(z.number().min(min).max(max));
+
+export const reverseGeocodeSchema = {
+  query: z.object({ lat: coordinate(-90, 90), lng: coordinate(-180, 180) }).strict(),
 };
 ```
 
@@ -1606,6 +1773,16 @@ export const cancelOrderSchema = {
   body: z
     .object({
       reason: z.string().trim().max(300).optional(),
+    })
+    .strict(),
+};
+
+export const refundOrderSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+  body: z
+    .object({
+      amount: z.number().int().min(1).optional(), // paise; omitted = everything still refundable
+      reason: z.string().trim().min(1).max(200),
     })
     .strict(),
 };
@@ -1689,6 +1866,7 @@ export const createPincodeSchema = {
       isActive: z.boolean().default(true),
       deliveryFee: paiseSchema.nullable().default(null), // null = use the store-wide delivery fee
       etaDays: z.number().int().min(0).max(30).default(2),
+      etaMinutes: z.number().int().min(5).max(1440).nullable().default(null), // quick-delivery areas; null = use etaDays
     })
     .strict(),
 };
@@ -1702,6 +1880,7 @@ export const updatePincodeSchema = {
       isActive: z.boolean().optional(),
       deliveryFee: paiseSchema.nullable().optional(),
       etaDays: z.number().int().min(0).max(30).optional(),
+      etaMinutes: z.number().int().min(5).max(1440).nullable().optional(),
     })
     .strict()
     .refine((v) => Object.keys(v).length > 0, { message: 'Send at least one field to change' }),
@@ -2001,7 +2180,7 @@ export const reviewIdParamSchema = {
 
 ```js
 import { z } from 'zod';
-import { boolParam, mobileSchema, objectIdSchema, pageQuerySchema, paiseSchema } from '../utils/zodHelpers.js';
+import { boolParam, mobileSchema, objectIdSchema, pageQuerySchema, paiseSchema, passwordSchema, usernameSchema } from '../utils/zodHelpers.js';
 
 const ORDER_STATUSES = ['placed', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 
@@ -2017,7 +2196,9 @@ export const createRiderSchema = {
   body: z
     .object({
       name: z.string().trim().min(1).max(80),
-      mobile: mobileSchema,
+      mobile: mobileSchema, // still required: calls and push, not for login
+      username: usernameSchema,
+      password: passwordSchema,
       isActive: z.boolean().default(true),
     })
     .strict(),
@@ -2029,6 +2210,8 @@ export const updateRiderSchema = {
     .object({
       name: z.string().trim().min(1).max(80).optional(),
       mobile: mobileSchema.optional(),
+      username: usernameSchema.optional(),
+      password: passwordSchema.optional(), // an admin RESETS the rider's password: all their sessions end
       isActive: z.boolean().optional(),
     })
     .strict()
@@ -2141,10 +2324,21 @@ export const authenticate = catchAsync(async (req, res, next) => {
     throw ApiError.forbidden(ErrorCodes.ACCOUNT_DISABLED, 'This account has been deactivated');
   }
 
+  // A password change / reset ends every earlier session: tokens issued before it are refused.
+  if (user.passwordChangedAt && payload.iat * 1000 < Math.floor(user.passwordChangedAt.getTime() / 1000) * 1000) {
+    throw ApiError.unauthorized(ErrorCodes.TOKEN_INVALID, 'Your password was changed. Please sign in again.');
+  }
+
   req.user = { id: user.id, mobile: user.mobile, role: user.role };
   req.userDoc = user;
   next();
 });
+
+/** Like `authenticate`, but a request WITHOUT an Authorization header goes through anonymously (req.user stays unset). */
+export const optionalAuthenticate = (req, res, next) => {
+  if (!req.headers.authorization) return next();
+  return authenticate(req, res, next);
+};
 
 /** Restricts a route to one or more roles. Use after `authenticate`. */
 export const requireRole =
@@ -2247,7 +2441,27 @@ STORE_UTC_OFFSET_MINUTES=330
 # A product is "low stock" at or below this many units (admin lowStock filter + dashboard count).
 LOW_STOCK_THRESHOLD=10
 
+# ---- Staff login (admin + rider: username / password; customers use the OTP) ----
+# Failed-attempt limits per IP / per username per 15 minutes (on top of the account lock: 5 wrong passwords = 15 min).
+STAFF_LOGIN_IP_LIMIT=20
+STAFF_LOGIN_USER_LIMIT=10
+# bcrypt cost for staff passwords. Keep 12.
+BCRYPT_COST=12
+
+# ---- Location -> area + pincode (GET /geo/reverse) ----
+# nominatim = OpenStreetMap, free (the default). Its usage policy needs an identifying User-Agent with a contact and at most
+# 1 request/second (the API queues calls and caches results for 24 h). google = Google Geocoding API (needs GOOGLE_MAPS_API_KEY).
+GEO_PROVIDER=nominatim
+GEO_USER_AGENT=AaliMarketApi/1.0 (ops@your-domain.example)
+GOOGLE_MAPS_API_KEY=
+GEO_RATE_LIMIT_PER_MINUTE=30
+
 # ---- Seed ----
+# The seeded admin signs in with SEED_ADMIN_USERNAME + SEED_ADMIN_PASSWORD (min 8 chars, a letter and a number).
+# There is NO default password: with NODE_ENV=production `npm run seed` refuses to run without SEED_ADMIN_PASSWORD.
+# An existing password is never overwritten; to change it later run:  npm run admin:set-password -- <username>
+SEED_ADMIN_USERNAME=admin
+SEED_ADMIN_PASSWORD=
 SEED_ADMIN_MOBILE=9999999999
 SEED_ADMIN_NAME=Aali Admin
 SEED_ADMIN_EMAIL=admin@aalimarket.in
@@ -2363,7 +2577,34 @@ export const env = {
   // A product counts as "low stock" at or below this many units (admin product filter + dashboard stats).
   lowStockThreshold: toInt(process.env.LOW_STOCK_THRESHOLD, 10),
 
+  // bcrypt work factor for staff passwords. 12 in every real environment; tests use 4 so the suite stays fast.
+  bcryptCost: process.env.NODE_ENV === 'test' ? 4 : toInt(process.env.BCRYPT_COST, 12),
+
+  // Admin / rider username + password login (POST /auth/staff/login).
+  staff: {
+    maxFailedAttempts: 5, // wrong passwords before the account locks
+    lockMinutes: 15,
+    loginWindowMinutes: 15,
+    loginIpLimit: toInt(process.env.STAFF_LOGIN_IP_LIMIT, 20), // failed attempts per IP per window
+    loginUserLimit: toInt(process.env.STAFF_LOGIN_USER_LIMIT, 10), // failed attempts per username per window
+  },
+
+  // Reverse geocoding for GET /geo/reverse ("Delivering to G Block, Sector 63").
+  geo: {
+    provider: (process.env.GEO_PROVIDER || 'nominatim').trim().toLowerCase(), // nominatim (free, OpenStreetMap) | google
+    googleApiKey: process.env.GOOGLE_MAPS_API_KEY || '',
+    // Nominatim's usage policy requires an identifying User-Agent (put a contact in it, e.g. "AaliMarket/1.0 (ops@your-domain)").
+    userAgent: process.env.GEO_USER_AGENT || 'AaliMarketApi/1.0',
+    // Nominatim allows at most 1 request per second: outbound calls are spaced this far apart.
+    nominatimMinIntervalMs: toInt(process.env.GEO_NOMINATIM_MIN_INTERVAL_MS, 1100),
+    cacheTtlMs: 24 * 60 * 60 * 1000,
+    rateLimitPerMinute: toInt(process.env.GEO_RATE_LIMIT_PER_MINUTE, 30), // per IP
+  },
+
   seed: {
+    adminUsername: (process.env.SEED_ADMIN_USERNAME || 'admin').trim().toLowerCase(),
+    // No default: in production the seed refuses to run without it.
+    adminPassword: process.env.SEED_ADMIN_PASSWORD || '',
     adminMobile: process.env.SEED_ADMIN_MOBILE || '9999999999',
     adminName: process.env.SEED_ADMIN_NAME || 'Aali Admin',
     adminEmail: process.env.SEED_ADMIN_EMAIL || 'admin@aalimarket.in',

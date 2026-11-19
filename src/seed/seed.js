@@ -7,6 +7,8 @@ import { Coupon } from '../models/Coupon.js';
 import { User } from '../models/User.js';
 import { Pincode } from '../models/Pincode.js';
 import { getSettings } from '../services/settings.service.js';
+import { setPassword } from '../services/staff-auth.service.js';
+import { assertSeedAdminConfig } from './admin-config.js';
 import { categories as categoryFixtures, productRows } from './data.js';
 
 function slugify(text) {
@@ -91,18 +93,30 @@ async function seedCoupon() {
 }
 
 async function seedAdmin() {
-  await User.findOneAndUpdate(
-    { mobile: env.seed.adminMobile },
+  const { adminUsername, adminPassword, adminMobile } = env.seed;
+  const admin = await User.findOneAndUpdate(
+    { mobile: adminMobile },
     {
-      mobile: env.seed.adminMobile,
+      mobile: adminMobile,
       name: env.seed.adminName,
       email: env.seed.adminEmail,
       role: 'admin',
       isVerified: true,
+      username: adminUsername,
     },
     { upsert: true, new: true }
-  );
-  logger.info(`Seeded admin user (${env.seed.adminMobile})`);
+  ).select('+passwordHash');
+
+  // The seed never overwrites an existing password (re-running it must not undo a changed one): use
+  // `npm run admin:set-password -- <username>` to change it.
+  if (admin.passwordHash) {
+    logger.info(`Seeded admin "${adminUsername}" (${adminMobile}); its existing password was left unchanged`);
+  } else if (adminPassword) {
+    await setPassword(admin, adminPassword);
+    logger.info(`Seeded admin "${adminUsername}" (${adminMobile}) with the password from SEED_ADMIN_PASSWORD`);
+  } else {
+    logger.warn(`Seeded admin "${adminUsername}" WITHOUT a password: run  npm run admin:set-password -- ${adminUsername}`);
+  }
 }
 
 // Starter delivery areas. NOTE: once ANY pincode exists, only active listed pincodes are serviceable
@@ -123,6 +137,7 @@ async function seedSettingsAndPincodes() {
 }
 
 async function run() {
+  assertSeedAdminConfig();
   await connectDB();
   logger.info('Starting seed...');
 

@@ -36,6 +36,20 @@ export const objectIdSchema = z
 
 export const paiseSchema = z.number().int().nonnegative();
 
+/** Staff username: 3-30 chars of a-z 0-9 . _  (trimmed and lower-cased first). */
+export const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9._]{3,30}$/, 'Username must be 3-30 characters: a-z, 0-9, "." and "_"');
+
+/** Staff password: at least 8 characters with a letter and a number (bcrypt only reads the first 72 bytes). */
+export const passwordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters')
+  .refine((v) => Buffer.byteLength(v, 'utf8') <= 72, 'Password is too long (max 72 bytes)')
+  .refine((v) => /[A-Za-z]/.test(v) && /\d/.test(v), 'Password must contain a letter and a number');
+
 export const pageQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1),

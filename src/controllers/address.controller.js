@@ -75,6 +75,7 @@ export const checkServiceability = catchAsync(async (req, res) => {
       pincode,
       serviceable: delivery.serviceable,
       etaDays: delivery.etaDays,
+      etaMinutes: delivery.etaMinutes, // set for quick-delivery areas ("30 minutes"), else null
       areaName: delivery.areaName,
       // Base delivery fee (paise) for this pincode, before the free-delivery threshold is applied.
       deliveryFee: settings ? delivery.deliveryFeeOverride ?? settings.deliveryFee : null,

@@ -5,6 +5,7 @@ import { ErrorCodes } from '../utils/errorCodes.js';
 import * as orderService from '../services/order.service.js';
 import * as cartService from '../services/cart.service.js';
 import * as riderService from '../services/rider.service.js';
+import * as refundService from '../services/refund.service.js';
 import { getPaymentProvider, buildPaymentInfo, retryOrderPayment, switchOrderToCod } from '../services/payment.service.js';
 
 export const createOrder = catchAsync(async (req, res) => {
@@ -77,6 +78,11 @@ export const adminGetOrder = catchAsync(async (req, res) => {
 export const adminUpdateOrderStatus =catchAsync(async (req, res) => {
   const order = await orderService.updateOrderStatus(req.params.id, req.body.status, req.body.note);
   sendSuccess(res, { data: order });
+});
+
+/** POST /admin/orders/:id/refund { amount?, reason } */
+export const adminRefundOrder = catchAsync(async (req, res) => {
+  sendSuccess(res, { data: await refundService.adminRefundOrder(req.params.id, req.body) });
 });
 
 export const adminLatestOrders = catchAsync(async (req, res) => {

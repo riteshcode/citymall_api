@@ -21,6 +21,10 @@ const { Pincode } = await import('../src/models/Pincode.js');
 const { Order } = await import('../src/models/Order.js');
 const { generateVAPIDKeys } = await import('web-push');
 const push = await import('../src/services/push.service.js');
+const geo = await import('../src/services/geo.service.js');
+const { setPassword } = await import('../src/services/staff-auth.service.js');
+const { getPaymentProvider } = await import('../src/services/payment.service.js');
+const { Order: OrderModel } = await import('../src/models/Order.js');
 const { categories, productRows } = await import('../src/seed/data.js');
 
 const base = env.apiBasePath;
@@ -72,7 +76,8 @@ for (const [cs, en, hi, brand, unit, mrp, price, stock, tags] of productRows) {
 }
 const now = new Date();
 await Coupon.create({ code: 'AALI50', type: 'flat', value: 5000, minOrderValue: 19900, maxDiscount: null, startsAt: now, expiresAt: new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()), usageLimit: 10000, perUserLimit: 1, isActive: true });
-await User.create({ mobile: env.seed.adminMobile, name: env.seed.adminName, email: env.seed.adminEmail, role: 'admin', isVerified: true });
+const adminDoc = await User.create({ mobile: env.seed.adminMobile, name: env.seed.adminName, email: env.seed.adminEmail, role: 'admin', isVerified: true, username: 'admin' });
+await setPassword(adminDoc, 'Admin@12345');
 
 await Pincode.create([
   { pincode: '261001', areaName: { en: 'Sitapur', hi: 'सीतापुर' }, etaDays: 1 },
@@ -88,10 +93,14 @@ async function login(mobile, name) {
   const verify = await api('post', '/auth/otp/verify').send({ mobile, code: sent.body.data.code, purpose: 'login', name });
   return { sent, verify, token: verify.body.data.accessToken };
 }
+async function staffLogin(username, password) {
+  const res = await api('post', '/auth/staff/login').send({ username, password });
+  return { res, token: res.body.data?.accessToken };
+}
 const bearer = (t) => ({ Authorization: `Bearer ${t}` });
 
 // ---- admin login (not shown as a sample; same endpoints as customer) ----
-const admin = await login(env.seed.adminMobile);
+const admin = await staffLogin('admin', 'Admin@12345');
 const A = bearer(admin.token);
 
 // ---- customer: OTP ----
@@ -220,14 +229,15 @@ await api('delete', '/cart').set(C);
 
 // ---- riders
 const riderMobile = '9877700001';
-const rider = await call('POST /admin/riders', api('post', '/admin/riders').set(A).send({ name: 'Ramesh Kumar', mobile: riderMobile }));
+const rider = await call('POST /admin/riders (mobile for calls / push, username + password for login)', api('post', '/admin/riders').set(A).send({ name: 'Ramesh Kumar', mobile: riderMobile, username: 'ramesh.kumar', password: 'Rider@12345' }));
 await call('GET /admin/riders', api('get', '/admin/riders').set(A));
 await call('PATCH /admin/riders/:id', api('patch', `/admin/riders/${rider.body.data.id}`).set(A).send({ name: 'Ramesh Yadav' }));
+await call('PATCH /admin/riders/:id (reset the password: all of that rider\'s sessions end)', api('patch', `/admin/riders/${rider.body.data.id}`).set(A).send({ password: 'Rider@67890' }));
 await api('patch', `/admin/orders/${notedId}/status`).set(A).send({ status: 'confirmed' });
 await call('PATCH /admin/orders/:id/assign (order.rider populated; no deliveryOtp)', api('patch', `/admin/orders/${notedId}/assign`).set(A).send({ riderId: rider.body.data.id }));
 await call('GET /admin/orders?q=<orderNumber> (rider { id, name, mobile } populated)', api('get', '/admin/orders').set(A).query({ q: noted.body.data.orderNumber }));
 
-const riderLogin = await login(riderMobile, 'Ramesh Yadav');
+const riderLogin = await staffLogin('ramesh.kumar', 'Rider@67890');
 const R = bearer(riderLogin.token);
 await call('GET /rider/orders (only mine; no deliveryOtp)', api('get', '/rider/orders').set(R));
 await call('PATCH /rider/orders/:id/out-for-delivery', api('patch', `/rider/orders/${notedId}/out-for-delivery`).set(R).send());
@@ -358,7 +368,7 @@ samples.push({
   note: 'Sent with web-push after PATCH /admin/orders/:id/status (also after rider actions and a confirmed payment). Bilingual because customers have no stored language. 404/410 from the push service deletes the subscription.',
 });
 // ---- rider push: assign / reassign (same stubbed transport; payloads are what the rider's service worker receives)
-const rider2 = await api('post', '/admin/riders').set(A).send({ name: 'Suresh Verma', mobile: '9877700002' });
+const rider2 = await api('post', '/admin/riders').set(A).send({ name: 'Suresh Verma', mobile: '9877700002', username: 'suresh.verma', password: 'Rider@11111' });
 const riderSub = {
   endpoint: 'https://fcm.googleapis.com/fcm/send/rider-device-token',
   expirationTime: null,
@@ -384,6 +394,71 @@ samples.push({
 });
 
 await call('DELETE /me/push-subscriptions', api('delete', '/me/push-subscriptions').set(C).send({ endpoint: browserSub.endpoint }));
+
+// =====================================================================================================
+// v5: staff login, location -> area + pincode, quick delivery, refunds, offers
+// =====================================================================================================
+const lastNote = (text) => { samples.at(-1).note = text; };
+
+// ---- staff (admin / rider) username + password login
+await call('POST /auth/staff/login (admin)', api('post', '/auth/staff/login').send({ username: 'admin', password: 'Admin@12345' }));
+await call('POST /auth/staff/login -> error INVALID_CREDENTIALS (a wrong password and an unknown username give this same answer)', api('post', '/auth/staff/login').send({ username: 'admin', password: 'Not-the-password1' }));
+await api('post', '/admin/riders').set(A).send({ name: 'Lock Demo', mobile: '9877700003', username: 'lock.demo', password: 'Rider@33333' });
+for (let i = 0; i < 4; i += 1) await api('post', '/auth/staff/login').send({ username: 'lock.demo', password: `Wrong-pass${i}` });
+await call('POST /auth/staff/login -> error ACCOUNT_LOCKED (the 5th wrong password locks the account for 15 minutes)', api('post', '/auth/staff/login').send({ username: 'lock.demo', password: 'Wrong-pass5' }));
+await call('POST /auth/otp/send -> error USE_PASSWORD_LOGIN (the mobile belongs to an admin or rider; no OTP is generated)', api('post', '/auth/otp/send').send({ mobile: env.seed.adminMobile, purpose: 'login' }));
+const sureshLogin = await staffLogin('suresh.verma', 'Rider@11111');
+await call('PATCH /me/password (staff only; returns a fresh token pair, every other session is signed out)', api('patch', '/me/password').set(bearer(sureshLogin.token)).send({ currentPassword: 'Rider@11111', newPassword: 'Rider@22222x' }));
+
+// ---- current location -> area + pincode (the provider call is stubbed: no network in this script)
+geo.geoTransport.fetch = async () => ({
+  ok: true,
+  status: 200,
+  json: async () => ({ address: { neighbourhood: 'G Block', suburb: 'Sector 63', city: 'Noida', state: 'Uttar Pradesh', postcode: '201 301', country_code: 'in' } }),
+});
+await call('GET /geo/reverse?lat=&lng= (public)', api('get', '/geo/reverse').query({ lat: 28.6139, lng: 77.209 }));
+lastNote('Shown with a stubbed OpenStreetMap (Nominatim) answer. The result is cached 24 hours per 3-decimal cell; Nominatim calls are queued 1 per second.');
+await call('GET /geo/reverse -> error GEO_NOT_FOUND (outside India, or no pincode there)', api('get', '/geo/reverse').query({ lat: 51.5074, lng: -0.1278 }));
+await call('GET /geo/reverse -> error VALIDATION_ERROR', api('get', '/geo/reverse').query({ lat: 'abc', lng: 77.2 }));
+
+// ---- quick-delivery area
+await call('POST /admin/pincodes (quick-delivery area: etaMinutes)', api('post', '/admin/pincodes').set(A).send({ pincode: '201301', areaName: { en: 'Noida - Sector 63', hi: 'नोएडा - सेक्टर 63' }, deliveryFee: null, etaDays: 1, etaMinutes: 30 }));
+await call('GET /serviceability?pincode=201301 (now with etaMinutes)', api('get', '/serviceability').query({ pincode: '201301' }));
+const noidaAddr = await api('post', '/addresses').set(C).send({ label: 'Office', line1: 'Tower B, Sector 63', city: 'Noida', state: 'Uttar Pradesh', pincode: '201301' });
+await api('post', '/cart/items').set(C).send({ productId: atta.id, qty: 1 });
+await call('POST /orders (expectedDeliveryAt = order time + etaMinutes)', api('post', '/orders').set(C).set('Idempotency-Key', 'sample-key-quick').send({ addressId: noidaAddr.body.data.id, paymentMethod: 'cod' }));
+
+// ---- refunds
+const paidOnline = async (key, paymentId) => {
+  await api('post', '/cart/items').set(C).send({ productId: atta.id, qty: 2 });
+  const o = await api('post', '/orders').set(C).set('Idempotency-Key', key).send({ addressId, paymentMethod: 'upi' });
+  await api('post', '/payments/verify').set(C).send({ orderId: o.body.data.id, razorpay_payment_id: paymentId, razorpay_signature: 'dev-signature' });
+  return o.body.data;
+};
+const refundOrder = await paidOnline('sample-key-refund-1', 'pay_REFUND1');
+await call('POST /admin/orders/:id/refund (partial refund, e.g. an item was missing)', api('post', `/admin/orders/${refundOrder.id}/refund`).set(A).send({ amount: 3000, reason: 'One item was missing' }));
+await call('POST /admin/orders/:id/refund -> error REFUND_AMOUNT_EXCEEDED (more than was paid)', api('post', `/admin/orders/${refundOrder.id}/refund`).set(A).send({ amount: 99999999, reason: 'Typo' }));
+await call('PATCH /admin/orders/:id/status -> "cancelled" (stock and coupon come back; the rest of a paid online order is refunded)', api('patch', `/admin/orders/${refundOrder.id}/status`).set(A).send({ status: 'cancelled', note: 'Customer asked to cancel' }));
+
+// Razorpay answers "pending" and finishes through the refund.processed webhook (the gateway call is stubbed here)
+const razorpayOrder = await paidOnline('sample-key-refund-2', 'pay_REFUND2');
+const gateway = getPaymentProvider();
+const realRefund = gateway.refund;
+gateway.refund = async ({ amountPaise }) => ({ id: 'rfnd_RZP_SAMPLE', amount: amountPaise, status: 'pending' });
+await call('POST /orders/:id/cancel (a paid online order: refund starts "pending" while the gateway works on it)', api('post', `/orders/${razorpayOrder.id}/cancel`).set(C).send({ reason: 'Ordered by mistake' }));
+gateway.refund = realRefund;
+const hook = JSON.stringify({ event: 'refund.processed', payload: { refund: { entity: { id: 'rfnd_RZP_SAMPLE', payment_id: 'pay_REFUND2', amount: razorpayOrder.pricing.total, status: 'processed' } } } });
+await call('POST /payments/webhook (refund.processed; idempotent)', api('post', '/payments/webhook').set('x-razorpay-signature', 'dev-signature').set('Content-Type', 'application/json').send(hook));
+await call('GET /orders/:id (after the webhook: paymentStatus "refunded", refund fields filled)', api('get', `/orders/${razorpayOrder.id}`).set(C));
+
+// ---- offers
+const dayMs = 24 * 3600 * 1000;
+await call('POST /admin/coupons (with a bilingual description)', api('post', '/admin/coupons').set(A).send({
+  code: 'WELCOME100', description: { en: 'Flat Rs 100 off on orders above Rs 499', hi: '499 रुपये से ऊपर के ऑर्डर पर 100 रुपये की छूट' },
+  type: 'flat', value: 10000, minOrderValue: 49900, startsAt: new Date(Date.now() - dayMs).toISOString(), expiresAt: new Date(Date.now() + 30 * dayMs).toISOString(), usageLimit: 500, perUserLimit: 1,
+}));
+await call('GET /coupons/available (no login)', api('get', '/coupons/available'));
+await call('GET /coupons/available (logged in: AALI50 is gone, this customer already used it)', api('get', '/coupons/available').set(C));
 
 // ---- error examples from the new store rules ----
 await api('post', '/cart/items').set(C).send({ productId: water.id, qty: 1 });

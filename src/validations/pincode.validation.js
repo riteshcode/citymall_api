@@ -18,6 +18,7 @@ export const createPincodeSchema = {
       isActive: z.boolean().default(true),
       deliveryFee: paiseSchema.nullable().default(null), // null = use the store-wide delivery fee
       etaDays: z.number().int().min(0).max(30).default(2),
+      etaMinutes: z.number().int().min(5).max(1440).nullable().default(null), // quick-delivery areas; null = use etaDays
     })
     .strict(),
 };
@@ -31,6 +32,7 @@ export const updatePincodeSchema = {
       isActive: z.boolean().optional(),
       deliveryFee: paiseSchema.nullable().optional(),
       etaDays: z.number().int().min(0).max(30).optional(),
+      etaMinutes: z.number().int().min(5).max(1440).nullable().optional(),
     })
     .strict()
     .refine((v) => Object.keys(v).length > 0, { message: 'Send at least one field to change' }),

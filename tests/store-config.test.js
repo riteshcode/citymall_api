@@ -144,7 +144,7 @@ describe('Serviceable areas (pincodes)', () => {
 
   it('open mode: with no pincodes configured every valid pincode is serviceable', async () => {
     const res = await check('991234');
-    expect(res.body.data).toEqual({ pincode: '991234', serviceable: true, etaDays: 2, areaName: null, deliveryFee: env.pricing.deliveryFeePaise });
+    expect(res.body.data).toEqual({ pincode: '991234', serviceable: true, etaDays: 2, etaMinutes: null, areaName: null, deliveryFee: env.pricing.deliveryFeePaise });
   });
 
   it('CRUD + defaults; serviceability reads the collection', async () => {
@@ -158,11 +158,12 @@ describe('Serviceable areas (pincodes)', () => {
       pincode: '261001',
       serviceable: true,
       etaDays: 2,
+      etaMinutes: null,
       areaName: { en: 'Sitapur', hi: 'सीतापुर' },
       deliveryFee: env.pricing.deliveryFeePaise,
     });
     // Once one pincode exists, unlisted ones are NOT serviceable.
-    expect((await check('110001')).body.data).toEqual({ pincode: '110001', serviceable: false, etaDays: null, areaName: null, deliveryFee: null });
+    expect((await check('110001')).body.data).toEqual({ pincode: '110001', serviceable: false, etaDays: null, etaMinutes: null, areaName: null, deliveryFee: null });
 
     const id = created.body.data.id;
     const patched = await request(app).patch(`${base}/admin/pincodes/${id}`).set(adminH).send({ areaName: { en: 'Sitapur City' }, deliveryFee: 3000, etaDays: 4 });

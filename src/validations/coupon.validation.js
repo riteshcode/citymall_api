@@ -1,8 +1,9 @@
 import { z } from 'zod';
-import { objectIdSchema, paiseSchema } from '../utils/zodHelpers.js';
+import { bilingualText, objectIdSchema, paiseSchema } from '../utils/zodHelpers.js';
 
 const couponBodyBase = {
   code: z.string().trim().toUpperCase().min(3).max(30),
+  description: bilingualText(1, 200).nullable().default(null),
   type: z.enum(['flat', 'percent']),
   value: z.number().int().min(1),
   minOrderValue: paiseSchema.default(0),
@@ -29,6 +30,7 @@ export const updateCouponSchema = {
   params: z.object({ id: objectIdSchema }).strict(),
   body: z
     .object({
+      description: bilingualText(1, 200).nullable().optional(), // null removes it
       type: z.enum(['flat', 'percent']).optional(),
       value: z.number().int().min(1).optional(),
       minOrderValue: paiseSchema.optional(),
@@ -44,4 +46,9 @@ export const updateCouponSchema = {
 
 export const couponIdParamSchema = {
   params: z.object({ id: objectIdSchema }).strict(),
+};
+
+// GET /coupons/available takes no parameters.
+export const availableCouponsSchema = {
+  query: z.object({}).strict(),
 };

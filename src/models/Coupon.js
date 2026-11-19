@@ -1,9 +1,12 @@
 import mongoose from 'mongoose';
 import { toJSONPlugin } from '../utils/mongoosePlugins.js';
+import { bilingualSchema } from './shared/bilingual.js';
 
 const couponSchema = new mongoose.Schema(
   {
     code: { type: String, required: true, unique: true, uppercase: true, trim: true },
+    // Optional offer text for the "Offers" screen, e.g. { en: "Flat 50 off on orders above 199", hi: "..." }.
+    description: { type: bilingualSchema, default: undefined },
     type: { type: String, enum: ['flat', 'percent'], required: true },
     // flat -> paise; percent -> whole number percent (e.g. 10 = 10%)
     value: { type: Number, required: true, min: 0 },

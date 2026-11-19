@@ -11,6 +11,7 @@ import { notifyOrderStatusChange } from './push.service.js';
  *   createOrder({ amountPaise, currency, receipt }): Promise<{ id, amount, currency, status }>
  *   verifySignature({ rawBody, signature }): boolean              // webhook (HMAC over raw body, webhook secret)
  *   verifyPaymentSignature({ providerOrderId, paymentId, signature }): boolean   // checkout callback
+ *   refund({ paymentId, amountPaise, receipt, notes }): Promise<{ id, amount, status: 'pending'|'processed'|'failed' }>
  */
 
 const safeEqualHex = (expected, actual) => {
@@ -33,6 +34,13 @@ const mockProvider = {
   },
   verifyPaymentSignature({ signature }) {
     return !env.isProd && Boolean(signature);
+  },
+
+  /** The mock gateway finishes every refund at once. */
+  async refund({ paymentId, amountPaise }) {
+    const id = `rfnd_mock_${crypto.randomBytes(8).toString('hex')}`;
+    logger.info(`[Payments:mock] refunded ${amountPaise} paise of ${paymentId} as ${id}`);
+    return { id, amount: amountPaise, status: 'processed' };
   },
 };
 
@@ -66,6 +74,41 @@ const razorpayProvider = {
       throw new ApiError(502, ErrorCodes.PAYMENT_PROVIDER_ERROR, 'Could not create the payment, please retry');
     }
     return { id: body.id, amount: body.amount, currency: body.currency, status: body.status };
+  },
+
+  /**
+   * Real Razorpay refund (https://razorpay.com/docs/api/refunds/create-instant/ - "normal" speed). Usually answers
+   * "pending"; the final state arrives through the refund.processed / refund.failed webhook.
+   */
+  async refund({ paymentId, amountPaise, receipt, notes }) {
+    const { razorpayKeyId, razorpayKeySecret } = env.payments;
+    if (!razorpayKeyId || !razorpayKeySecret) {
+      throw new ApiError(503, ErrorCodes.REFUND_PROVIDER_ERROR, 'Online payments are not configured');
+    }
+
+    let res;
+    try {
+      res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refund`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${Buffer.from(`${razorpayKeyId}:${razorpayKeySecret}`).toString('base64')}`,
+        },
+        body: JSON.stringify({ amount: amountPaise, speed: 'normal', receipt, notes }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      logger.error(`[Payments:razorpay] refund request failed: ${err.message}`);
+      throw new ApiError(502, ErrorCodes.REFUND_PROVIDER_ERROR, 'Could not reach the payment provider, please retry');
+    }
+
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const why = body?.error?.description || `HTTP ${res.status}`;
+      logger.error(`[Payments:razorpay] refund failed ${res.status}: ${why}`);
+      throw new ApiError(502, ErrorCodes.REFUND_PROVIDER_ERROR, `The payment provider refused the refund: ${why}`);
+    }
+    return { id: body.id, amount: body.amount, status: body.status === 'processed' ? 'processed' : body.status === 'failed' ? 'failed' : 'pending' };
   },
 
   /** Webhook signature = HMAC-SHA256(rawBody, webhookSecret), hex. */

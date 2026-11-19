@@ -10,6 +10,7 @@ import {
   buildPaymentInfo,
 } from '../services/payment.service.js';
 import { Order } from '../models/Order.js';
+import { applyRefundEvent } from '../services/refund.service.js';
 import { logger } from '../config/logger.js';
 
 function extractPayment(payload) {
@@ -42,6 +43,16 @@ export const handleWebhook = catchAsync(async (req, res) => {
   }
 
   const payload = JSON.parse(req.body.toString('utf8'));
+
+  // Refund results: refund.processed / refund.failed (refund.created and the rest are just acknowledged).
+  if (typeof payload.event === 'string' && payload.event.startsWith('refund.')) {
+    const entity = payload?.payload?.refund?.entity;
+    const outcome = payload.event === 'refund.processed' ? 'processed' : payload.event === 'refund.failed' ? 'failed' : null;
+    if (!outcome || !entity?.id) return sendSuccess(res, { data: { received: true, matched: false } });
+    const matched = await applyRefundEvent(outcome, entity);
+    return sendSuccess(res, { data: { received: true, matched } });
+  }
+
   const providerOrderId = extractProviderOrderId(payload);
   const status = extractStatus(payload);
 
@@ -57,6 +68,9 @@ export const handleWebhook = catchAsync(async (req, res) => {
   }
 
   if (status === 'paid') {
+    if (order.status === 'cancelled') {
+      logger.warn(`[Payments] order ${order.orderNumber} was paid online AFTER it was cancelled - refund it with POST /admin/orders/:id/refund`);
+    }
     if (order.paymentMethod === 'cod') {
       logger.warn(`[Payments] order ${order.orderNumber} was paid online after being switched to COD - reconcile manually`);
     }

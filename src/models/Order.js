@@ -46,6 +46,22 @@ const statusHistorySchema = new mongoose.Schema(
   { _id: false }
 );
 
+// One refund of an online payment (see services/refund.service.js). The order-level refund fields summarise these.
+const refundSchema = new mongoose.Schema(
+  {
+    refundId: { type: String, default: null }, // the gateway's id (null until the gateway has answered)
+    amount: { type: Number, required: true, min: 1 }, // paise
+    status: { type: String, enum: ['pending', 'processed', 'failed'], default: 'pending' },
+    reason: { type: String, default: '' },
+    source: { type: String, enum: ['cancel', 'admin', 'gateway'], default: 'admin' }, // gateway = made outside this API
+    failureReason: { type: String, default: null },
+    createdAt: { type: Date, default: Date.now },
+    processedAt: { type: Date, default: null },
+  },
+  { _id: true }
+);
+toJSONPlugin(refundSchema);
+
 const orderSchema = new mongoose.Schema(
   {
     orderNumber: { type: String, required: true, unique: true },
@@ -71,6 +87,13 @@ const orderSchema = new mongoose.Schema(
     // Gateway payment id (e.g. Razorpay pay_xxx), set when payment is verified / captured.
     paymentId: { type: String, default: null },
     cancelReason: { type: String, default: null },
+    // Refund summary (recomputed from `refunds`): the status of the latest refund, its gateway id, the total refunded so
+    // far (processed only) and when. paymentStatus turns "refunded" only once processed refunds cover the whole amount.
+    refundStatus: { type: String, enum: ['pending', 'processed', 'failed', null], default: null },
+    refundId: { type: String, default: null },
+    refundedAmount: { type: Number, default: 0, min: 0 },
+    refundedAt: { type: Date, default: null },
+    refunds: { type: [refundSchema], default: [] },
     deliveryNote: { type: String, trim: true, maxlength: 200, default: '' },
     // 4-digit code the customer reads out to the rider. `private`: stripped from every serialisation; only the
     // customer-facing order endpoints add it back explicitly. Never shown to admin or rider APIs.

@@ -12,6 +12,13 @@ const userSchema = new mongoose.Schema(
       match: /^[6-9]\d{9}$/,
     },
     name: { type: String, required: true, trim: true },
+    // Admin / rider only (customers sign in with an OTP). `sparse` so the many users without one don't collide.
+    username: { type: String, unique: true, sparse: true, lowercase: true, trim: true, minlength: 3, maxlength: 30, match: /^[a-z0-9._]+$/ },
+    passwordHash: { type: String, select: false, private: true },
+    passwordChangedAt: { type: Date },
+    // Login throttling (atomic counter; see staff-auth.service.js)
+    failedLoginAttempts: { type: Number, default: 0, private: true },
+    lockUntil: { type: Date, private: true },
     email: { type: String, trim: true, lowercase: true, default: undefined },
     role: { type: String, enum: ['customer', 'admin', 'rider'], default: 'customer' },
     addresses: { type: [addressSchema], default: [] },

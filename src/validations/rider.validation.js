@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { boolParam, mobileSchema, objectIdSchema, pageQuerySchema, paiseSchema } from '../utils/zodHelpers.js';
+import { boolParam, mobileSchema, objectIdSchema, pageQuerySchema, paiseSchema, passwordSchema, usernameSchema } from '../utils/zodHelpers.js';
 
 const ORDER_STATUSES = ['placed', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 
@@ -15,7 +15,9 @@ export const createRiderSchema = {
   body: z
     .object({
       name: z.string().trim().min(1).max(80),
-      mobile: mobileSchema,
+      mobile: mobileSchema, // still required: calls and push, not for login
+      username: usernameSchema,
+      password: passwordSchema,
       isActive: z.boolean().default(true),
     })
     .strict(),
@@ -27,6 +29,8 @@ export const updateRiderSchema = {
     .object({
       name: z.string().trim().min(1).max(80).optional(),
       mobile: mobileSchema.optional(),
+      username: usernameSchema.optional(),
+      password: passwordSchema.optional(), // an admin RESETS the rider's password: all their sessions end
       isActive: z.boolean().optional(),
     })
     .strict()

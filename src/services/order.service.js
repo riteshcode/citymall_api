@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { Order } from '../models/Order.js';
 import { Cart } from '../models/Cart.js';
 import { Product } from '../models/Product.js';
+import { Coupon } from '../models/Coupon.js';
+import { CouponRedemption } from '../models/CouponRedemption.js';
 import { User } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
@@ -13,7 +15,8 @@ import { containsRegex } from '../utils/regex.js';
 import { parseDateBoundary } from '../utils/dates.js';
 import { getSettings } from './settings.service.js';
 import { notifyOrderStatusChange } from './push.service.js';
-import { resolveDelivery } from './serviceability.service.js';
+import { refundOnCancel } from './refund.service.js';
+import { resolveDelivery, expectedDeliveryAt } from './serviceability.service.js';
 import { resolveSellable, reserveStock, releaseStock } from '../utils/variants.js';
 
 const CANCELLABLE_STATUSES = ['placed', 'confirmed', 'packed'];
@@ -146,7 +149,7 @@ export async function createOrder(userId, { addressId, paymentMethod, idempotenc
             paymentStatus: 'pending',
             status: 'placed',
             statusHistory: [{ status: 'placed', at: new Date() }],
-            expectedDeliveryAt: new Date(Date.now() + delivery.etaDays * 24 * 60 * 60 * 1000),
+            expectedDeliveryAt: expectedDeliveryAt(delivery),
             idempotencyKey,
             deliveryNote,
             deliveryOtp: generateDeliveryOtp(),
@@ -242,45 +245,94 @@ export async function getOrderById(userId, orderId, { isAdmin = false } = {}) {
   return order;
 }
 
-export async function cancelOrder(userId, orderId, reason) {
+/**
+ * The ONE place an order gets cancelled (customer cancel and admin status "cancelled" both end up here).
+ * In a single transaction it atomically claims the cancellation (status -> cancelled, only if it is not cancelled yet),
+ * puts the stock back into the SAME variants and gives back the coupon redemption. Because the claim is atomic, a second
+ * or concurrent cancel finds the order already cancelled and changes nothing (no double stock, no double coupon).
+ * After the commit a paid online order is refunded through the gateway (see refund.service.js).
+ *
+ * @param {object} claimFilter which order, and from which states it may be cancelled
+ * @returns {Promise<{ order: object|null, changed: boolean }>} order null = nothing matched the filter
+ */
+async function cancelOrderNow(claimFilter, reason) {
   const session = await mongoose.startSession();
+  let order = null;
+  let changed = false;
   try {
-    let order;
     await session.withTransaction(async () => {
-      order = await Order.findOne({ _id: orderId, user: userId }).session(session);
-      if (!order) {
-        throw ApiError.notFound(ErrorCodes.ORDER_NOT_FOUND, 'Order not found');
-      }
-      if (!CANCELLABLE_STATUSES.includes(order.status)) {
-        throw ApiError.badRequest(
-          ErrorCodes.ORDER_NOT_CANCELLABLE,
-          `Order cannot be cancelled once it is "${order.status}"`
-        );
-      }
+      changed = false;
+      order = await Order.findOneAndUpdate(
+        { ...claimFilter, status: claimFilter.status ?? { $ne: 'cancelled' } },
+        { $set: { status: 'cancelled', cancelReason: reason }, $push: { statusHistory: { status: 'cancelled', at: new Date(), note: reason } } },
+        { new: true, session }
+      );
+      if (!order) return;
+      changed = true;
 
       for (const item of order.items) {
         await releaseStock(item.product, item.variantId, item.qty, session); // back into the same variant
       }
 
-      order.status = 'cancelled';
-      order.cancelReason = reason || 'Cancelled by customer';
-      order.statusHistory.push({ status: 'cancelled', at: new Date(), note: order.cancelReason });
-      if (order.paymentStatus === 'paid') {
-        order.paymentStatus = 'refunded';
+      // The coupon was used by this order: free it again (usedCount down, the user's per-user limit free).
+      const redemption = await CouponRedemption.findOneAndDelete({ order: order._id }, { session });
+      if (redemption) {
+        await Coupon.updateOne({ _id: redemption.coupon, usedCount: { $gt: 0 } }, { $inc: { usedCount: -1 } }, { session });
       }
-      await order.save({ session });
     });
-    return order;
   } finally {
     await session.endSession();
   }
+  return { order, changed };
 }
 
-/** Admin: transitions order status and appends a statusHistory entry. */
+/** Money side of a cancellation, after the commit. Never throws: the cancellation stands even if the gateway is down. */
+async function settlePaymentAfterCancel(order, reason) {
+  if (order.paymentStatus !== 'paid') return order;
+  if (order.paymentMethod === 'cod') {
+    // cash that was already collected: nothing to send through a gateway, the shop returns it by hand
+    return (await Order.findByIdAndUpdate(order._id, { paymentStatus: 'refunded' }, { new: true })) ?? order;
+  }
+  const result = await refundOnCancel(order, reason);
+  return result?.order ?? (await Order.findById(order._id));
+}
+
+export async function cancelOrder(userId, orderId, reason) {
+  const why = reason || 'Cancelled by customer';
+  const { order, changed } = await cancelOrderNow({ _id: orderId, user: userId, status: { $in: CANCELLABLE_STATUSES } }, why);
+  if (!order || !changed) {
+    const current = await Order.findOne({ _id: orderId, user: userId }).select('status');
+    if (!current) throw ApiError.notFound(ErrorCodes.ORDER_NOT_FOUND, 'Order not found');
+    throw ApiError.badRequest(ErrorCodes.ORDER_NOT_CANCELLABLE, `Order cannot be cancelled once it is "${current.status}"`);
+  }
+  return settlePaymentAfterCancel(order, why);
+}
+
+/**
+ * Admin: transitions order status and appends a statusHistory entry.
+ * "cancelled" does everything a customer cancel does (stock, coupon, refund) and is idempotent; a cancelled order
+ * cannot be re-opened (its stock and refund are already settled).
+ */
 export async function updateOrderStatus(orderId, status, note) {
+  if (status === 'cancelled') {
+    const why = note || 'Cancelled by admin';
+    const { order, changed } = await cancelOrderNow({ _id: orderId }, why);
+    if (!order) {
+      const existing = await Order.findById(orderId);
+      if (!existing) throw ApiError.notFound(ErrorCodes.ORDER_NOT_FOUND, 'Order not found');
+      return existing; // already cancelled: nothing to do again
+    }
+    const settled = await settlePaymentAfterCancel(order, why);
+    if (changed) notifyOrderStatusChange(settled);
+    return settled;
+  }
+
   const order = await Order.findById(orderId);
   if (!order) {
     throw ApiError.notFound(ErrorCodes.ORDER_NOT_FOUND, 'Order not found');
+  }
+  if (order.status === 'cancelled') {
+    throw ApiError.badRequest(ErrorCodes.INVALID_ORDER_STATE, 'A cancelled order cannot be re-opened', { status: order.status });
   }
   order.status = status;
   order.statusHistory.push({ status, at: new Date(), note: note || '' });

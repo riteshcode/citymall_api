@@ -197,6 +197,7 @@ components:
         isActive: { type: boolean, default: true }
         deliveryFee: { type: integer, nullable: true, description: 'paise; null = use the store delivery fee' }
         etaDays: { type: integer, default: 2, minimum: 0, maximum: 30 }
+        etaMinutes: { type: integer, nullable: true, minimum: 5, maximum: 1440, description: 'quick-delivery areas: expectedDeliveryAt = order time + etaMinutes (wins over etaDays); null = use etaDays' }
 
     PricingBreakdown:
       type: object
@@ -274,7 +275,10 @@ paths:
   /auth/otp/send:
     post:
       tags: [Auth]
-      summary: Send a 6-digit OTP to a mobile number
+      summary: Send a 6-digit OTP to a CUSTOMER's mobile number (admin / rider mobiles use /auth/staff/login)
+      description: >-
+        The response includes the OTP `code` only when NODE_ENV is not production AND SMS_PROVIDER is console
+        (local development). In production it never does.
       requestBody:
         required: true
         content:
@@ -286,7 +290,8 @@ paths:
                 mobile: { type: string, example: '9876543210' }
                 purpose: { type: string, enum: [login, signup], default: login }
       responses:
-        '200': { description: OTP sent }
+        '200': { description: 'OTP sent: { mobile, expiresAt, ttlMinutes } (+ code in local development only)' }
+        '403': { description: 'USE_PASSWORD_LOGIN: the mobile belongs to an admin or rider; nothing was generated or sent' }
         '429': { description: Rate limited (3 sends / 15 min / mobile) }
 
   /auth/otp/verify:
@@ -309,6 +314,56 @@ paths:
         '200': { description: Existing user logged in }
         '201': { description: New user created and logged in }
         '400': { description: 'OTP_INVALID | OTP_EXPIRED | OTP_MAX_ATTEMPTS | OTP_NOT_FOUND' }
+        '403': { description: 'USE_PASSWORD_LOGIN (admin / rider mobile) | ACCOUNT_DISABLED' }
+
+  /auth/staff/login:
+    post:
+      tags: [Auth]
+      summary: Admin / rider sign-in with username + password
+      description: >-
+        Same response shape as /auth/otp/verify. A wrong password, an unknown username and a customer account all give the
+        SAME 401 INVALID_CREDENTIALS. 5 wrong passwords lock the account for 15 minutes (429 ACCOUNT_LOCKED, an atomic
+        counter). Failed attempts are also rate-limited per IP and per username (429 RATE_LIMITED).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string, example: admin }
+                password: { type: string, format: password }
+      responses:
+        '200': { description: '{ user, accessToken, refreshToken, isNewUser: false }' }
+        '401': { description: INVALID_CREDENTIALS }
+        '403': { description: ACCOUNT_DISABLED (only after the password was right) }
+        '429': { description: 'ACCOUNT_LOCKED (details.retryAfterSeconds) | RATE_LIMITED' }
+
+  /me/password:
+    patch:
+      tags: [Auth]
+      summary: Change my password (admin / rider only)
+      description: >-
+        New password: at least 8 characters with a letter and a number (max 72 bytes), different from the current one.
+        Every refresh token is revoked and access tokens issued earlier stop working; the response is a fresh token pair
+        for the current session. A wrong current password counts towards the account lock.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword: { type: string, format: password, minLength: 8 }
+      responses:
+        '200': { description: '{ accessToken, refreshToken, passwordChangedAt }' }
+        '400': { description: 'VALIDATION_ERROR (weak / same password) | INVALID_CURRENT_PASSWORD' }
+        '403': { description: FORBIDDEN (customers cannot) }
+        '429': { description: ACCOUNT_LOCKED }
 
   /auth/refresh:
     post:
@@ -612,12 +667,43 @@ paths:
       responses:
         '200': { description: OK }
 
+  /geo/reverse:
+    get:
+      tags: [Addresses]
+      summary: Current location -> area + pincode ("Delivering to G Block, Sector 63")
+      description: >-
+        Public, rate-limited per IP. India only. GEO_PROVIDER=nominatim (OpenStreetMap, free: identifying User-Agent, queued
+        1 request/second) or google (GOOGLE_MAPS_API_KEY). Coordinates are rounded to 3 decimals and answers cached for 24 hours.
+      parameters:
+        - { name: lat, in: query, required: true, schema: { type: number, minimum: -90, maximum: 90 } }
+        - { name: lng, in: query, required: true, schema: { type: number, minimum: -180, maximum: 180 } }
+      responses:
+        '200': { description: '{ pincode, area, city, state }' }
+        '400': { description: VALIDATION_ERROR }
+        '404': { description: 'GEO_NOT_FOUND (outside India, or no pincode found there)' }
+        '429': { description: RATE_LIMITED }
+        '502': { description: GEO_PROVIDER_ERROR }
+        '503': { description: GEO_NOT_CONFIGURED }
+
+  /coupons/available:
+    get:
+      tags: [Cart]
+      summary: Offers a customer can use right now
+      description: >-
+        Active, inside their dates, global usage limit not used up. With a token, coupons whose per-user limit that user has
+        used up are removed. An invalid / expired token is 401 (not treated as a guest). minOrderValue is shown, not filtered.
+      security: [{}, { bearerAuth: [] }]
+      responses:
+        '200': { description: '[{ code, type, value, minOrderValue, maxDiscount, expiresAt, description { en, hi } | null }] soonest-expiring first' }
+        '401': { description: 'TOKEN_INVALID | TOKEN_EXPIRED (a token was sent but is not valid)' }
+
   /serviceability:
     get:
       tags: [Addresses]
       summary: Check whether a pincode is serviceable (reads the admin-managed pincode list)
       description: >
-        Returns `{ pincode, serviceable, etaDays, areaName: {en,hi}|null, deliveryFee }` (deliveryFee in paise, null when not serviceable).
+        Returns `{ pincode, serviceable, etaDays, etaMinutes, areaName: {en,hi}|null, deliveryFee }` (deliveryFee in paise, null when not serviceable;
+        etaMinutes is set for quick-delivery areas, else null).
         While no pincode is configured at all, every pincode is serviceable.
       parameters: [{ name: pincode, in: query, required: true, schema: { type: string } }]
       responses:
@@ -679,6 +765,9 @@ paths:
     post:
       tags: [Orders]
       summary: Cancel an order (only while placed/confirmed/packed)
+      description: >-
+        Stock goes back to the same variant, the coupon is given back, and a paid online order is refunded (refundStatus
+        pending -> processed; paymentStatus "refunded" only when the refund is processed). A gateway failure never undoes the cancel.
       security: [{ bearerAuth: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
@@ -695,6 +784,9 @@ paths:
     post:
       tags: [Payments]
       summary: Razorpay-shaped payment webhook (raw body, HMAC signature verified)
+      description: >-
+        Payment events (payment.captured / failed) and refund events: refund.processed and refund.failed update Order.refunds
+        idempotently (only a pending refund moves, once). A refund made outside this API is recorded with source "gateway".
       responses:
         '200': { description: Acknowledged }
         '400': { description: PAYMENT_SIGNATURE_INVALID }
@@ -772,7 +864,7 @@ paths:
         '200': { description: OK }
     post:
       tags: [Admin]
-      summary: Create a coupon (admin only)
+      summary: Create a coupon (admin only); optional description { en, hi } shows on the Offers screen
       security: [{ bearerAuth: [] }]
       responses:
         '201': { description: Created }
@@ -795,6 +887,10 @@ paths:
     patch:
       tags: [Admin]
       summary: Transition an order's status (admin only)
+      description: >-
+        "cancelled" does everything a customer cancel does, in one transaction and idempotently: stock goes back to the
+        same variant, the coupon redemption is given back, and a paid ONLINE order is refunded through the gateway. A cancelled
+        order cannot be re-opened (400 INVALID_ORDER_STATE).
       security: [{ bearerAuth: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
@@ -884,6 +980,33 @@ paths:
         '200': { description: Order with paymentStatus = paid (idempotent) }
         '400': { description: 'PAYMENT_SIGNATURE_INVALID | PAYMENT_NOT_REQUIRED | ORDER_NOT_PAYABLE' }
         '404': { description: ORDER_NOT_FOUND }
+
+  /admin/orders/{id}/refund:
+    post:
+      tags: [Admin]
+      summary: Partial or full refund of a paid online order
+      description: >-
+        amount (paise) defaults to everything still refundable. The amount is reserved atomically, so refunds never add up to
+        more than was paid (pending refunds count). The order stays "paid" until processed refunds cover the whole amount, then
+        paymentStatus becomes "refunded". The mock gateway processes at once; Razorpay answers pending and finishes through the
+        refund.processed / refund.failed webhook.
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                amount: { type: integer, minimum: 1, description: paise }
+                reason: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        '200': { description: 'The order as GET /admin/orders/:id shows it, with refundStatus, refundId, refundedAmount, refundedAt and refunds[]' }
+        '400': { description: 'REFUND_AMOUNT_EXCEEDED (details.maxRefundable) | REFUND_NOT_ALLOWED (COD, unpaid, nothing left) | VALIDATION_ERROR' }
+        '404': { description: ORDER_NOT_FOUND }
+        '502': { description: REFUND_PROVIDER_ERROR }
 
   /admin/stats:
     get:
@@ -1202,10 +1325,10 @@ paths:
         - { name: q, in: query, schema: { type: string } }
         - { name: isActive, in: query, schema: { type: string, enum: ['true', 'false'] } }
       responses:
-        '200': { description: 'Array of { id, name, mobile, isActive, activeOrders, createdAt } + meta' }
+        '200': { description: 'Array of { id, name, mobile, username (null for older riders), isActive, activeOrders, createdAt } + meta; q also matches the username' }
     post:
       tags: [Admin]
-      summary: Create a rider (they log in with the normal OTP flow)
+      summary: Create a rider (they sign in with username + password; the mobile is for calls and push)
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -1213,14 +1336,17 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, mobile]
+              required: [name, mobile, username, password]
               properties:
                 name: { type: string }
                 mobile: { type: string, example: '9877700001' }
+                username: { type: string, example: ramesh.kumar, description: '3-30 characters: a-z 0-9 . _ (lower-cased)' }
+                password: { type: string, format: password, minLength: 8, description: 'a letter and a number' }
                 isActive: { type: boolean, default: true }
       responses:
-        '201': { description: Created }
-        '409': { description: MOBILE_ALREADY_REGISTERED }
+        '201': { description: Created (no password hash is ever returned) }
+        '400': { description: VALIDATION_ERROR }
+        '409': { description: 'MOBILE_ALREADY_REGISTERED | USERNAME_TAKEN' }
 
   /admin/riders/{id}:
     patch:

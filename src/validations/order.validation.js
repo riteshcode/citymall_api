@@ -48,6 +48,16 @@ export const cancelOrderSchema = {
     .strict(),
 };
 
+export const refundOrderSchema = {
+  params: z.object({ id: objectIdSchema }).strict(),
+  body: z
+    .object({
+      amount: z.number().int().min(1).optional(), // paise; omitted = everything still refundable
+      reason: z.string().trim().min(1).max(200),
+    })
+    .strict(),
+};
+
 export const updateOrderStatusSchema = {
   params: z.object({ id: objectIdSchema }).strict(),
   body: z

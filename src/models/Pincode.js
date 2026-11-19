@@ -11,6 +11,8 @@ const pincodeSchema = new mongoose.Schema(
     // Paise. null => use the store-wide Setting.deliveryFee. (Free-delivery threshold still applies on top.)
     deliveryFee: { type: Number, default: null, min: 0 },
     etaDays: { type: Number, default: 2, min: 0, max: 30 },
+    // Quick-delivery areas ("30 minutes"). When set, expectedDeliveryAt = order time + etaMinutes instead of etaDays.
+    etaMinutes: { type: Number, default: null, min: 5, max: 1440, validate: { validator: (v) => v === null || Number.isInteger(v), message: 'etaMinutes must be a whole number' } },
   },
   { timestamps: true }
 );

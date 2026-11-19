@@ -1,3 +1,8 @@
+// Read when src/config/env.js is first imported (after this file): keep the per-IP limits out of the way of the suite.
+process.env.STAFF_LOGIN_IP_LIMIT = '1000';
+process.env.GEO_RATE_LIMIT_PER_MINUTE = '1000';
+process.env.GEO_NOMINATIM_MIN_INTERVAL_MS = '0';
+
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 

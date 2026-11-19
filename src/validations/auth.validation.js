@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { mobileSchema } from '../utils/zodHelpers.js';
+import { mobileSchema, passwordSchema } from '../utils/zodHelpers.js';
 
 export const sendOtpSchema = {
   body: z
@@ -42,6 +42,26 @@ export const updateMeSchema = {
     .object({
       name: z.string().trim().min(1).max(80).optional(),
       email: z.string().trim().email().optional(),
+    })
+    .strict(),
+};
+
+// ---- staff (admin / rider) username + password
+export const staffLoginSchema = {
+  body: z
+    .object({
+      // Deliberately lenient: no format hints for an attacker, a wrong shape is simply "incorrect username or password".
+      username: z.string().trim().toLowerCase().min(1).max(64),
+      password: z.string().min(1).max(128),
+    })
+    .strict(),
+};
+
+export const changePasswordSchema = {
+  body: z
+    .object({
+      currentPassword: z.string().min(1).max(128),
+      newPassword: passwordSchema,
     })
     .strict(),
 };
