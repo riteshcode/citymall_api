@@ -10,6 +10,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/seed/seed.js",
+    "migrate": "node scripts/migrate.js",
     "samples": "node scripts/capture-samples.js",
     "db:init-replset": "node scripts/init-replset.js",
     "reference": "node scripts/build-reference.js",

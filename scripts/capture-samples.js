@@ -140,8 +140,9 @@ await call('GET /orders/:id (statusHistory)', api('get', `/orders/${orderId}`).s
 
 // ---- reviews (needs delivered order) ----
 await api('patch', `/admin/orders/${orderId}/status`).set(A).send({ status: 'delivered', note: 'Delivered' });
-const rev = await call('POST /products/:id/reviews', api('post', `/products/${atta.id}/reviews`).set(C).send({ rating: 5, comment: 'Great quality atta.' }));
-await call('GET /products/:id/reviews', api('get', `/products/${atta.id}/reviews`));
+const rev = await call('POST /products/:id/reviews (starts as "pending" until an admin approves it)', api('post', `/products/${atta.id}/reviews`).set(C).send({ rating: 5, comment: 'Great quality atta.' }));
+await call('GET /products/:id/reviews/mine (the customer\'s own review, any status)', api('get', `/products/${atta.id}/reviews/mine`).set(C));
+await call('GET /products/:id/reviews (public: approved reviews only, so still empty)', api('get', `/products/${atta.id}/reviews`));
 
 // ---- wishlist ----
 await api('post', `/wishlist/${water.id}`).set(C);
@@ -258,8 +259,82 @@ const attachCsv = (r) => r.attach('file', Buffer.from(importCsv, 'utf8'), { file
 await call('POST /admin/products/import?dryRun=true (validates, writes nothing)', attachCsv(api('post', '/admin/products/import').query({ dryRun: 'true' }).set(A)));
 await call('POST /admin/products/import (applies the valid rows)', attachCsv(api('post', '/admin/products/import').set(A)));
 
+// =====================================================================================================
+// v4: product variants, review approval, rider push
+// =====================================================================================================
+const groceryCat = await Category.findOne({ slug: 'grocery-staples' });
+const variantBody = {
+  title: { en: 'Aashirvaad Select Atta', hi: 'आशीर्वाद सेलेक्ट आटा' },
+  slug: 'aashirvaad-select-atta',
+  description: { en: 'Whole wheat flour, sold in three pack sizes.', hi: 'गेहूं का आटा, तीन पैक साइज़ में।' },
+  category: groceryCat.id,
+  brand: 'Aashirvaad',
+  images: ['https://res.cloudinary.com/demo/image/upload/aali-market/products/atta.jpg'],
+  optionName: { en: 'Pack size', hi: 'पैक साइज़' },
+  variants: [
+    { label: { en: '1 kg', hi: '1 किलो' }, sku: 'ATTA-1', mrp: 6000, price: 5200, stock: 40, isDefault: true },
+    { label: { en: '5 kg', hi: '5 किलो' }, sku: 'ATTA-5', mrp: 27500, price: 24900, stock: 25 },
+    { label: { en: '10 kg', hi: '10 किलो' }, sku: 'ATTA-10', mrp: 55000, price: 47000, stock: 8, images: ['https://res.cloudinary.com/demo/image/upload/aali-market/products/atta-10kg.jpg'] },
+  ],
+};
+const varProduct = await call('POST /admin/products (with variants: price / mrp / unit / stock are derived)', api('post', '/admin/products').set(A).send(variantBody));
+const vp = varProduct.body.data;
+const vId = (label) => vp.variants.find((v) => v.label.en === label).id;
+await call('POST /admin/products -> error: two default variants', api('post', '/admin/products').set(A).send({ ...variantBody, slug: 'bad-atta', variants: variantBody.variants.map((v) => ({ ...v, isDefault: true })) }));
+await call('GET /products/:slug (product with variants; inactive variants are hidden from customers)', api('get', `/products/${vp.slug}`));
+
+await call('POST /cart/items without variantId -> error VARIANT_REQUIRED', api('post', '/cart/items').set(C).send({ productId: vp.id, qty: 1 }));
+await call('POST /cart/items (variantId)', api('post', '/cart/items').set(C).send({ productId: vp.id, variantId: vId('5 kg'), qty: 2 }));
+await api('post', '/cart/items').set(C).send({ productId: vp.id, variantId: vId('1 kg'), qty: 1 });
+await call('GET /cart (each variant is its own line, with its own price / mrp / stock / label)', api('get', '/cart').set(C));
+await call('PATCH /cart/items/:productId?variantId= (changes only that line)', api('patch', `/cart/items/${vp.id}`).query({ variantId: vId('1 kg') }).set(C).send({ qty: 3 }));
+await call('DELETE /cart/items/:productId?variantId= (removes only that line)', api('delete', `/cart/items/${vp.id}`).query({ variantId: vId('1 kg') }).set(C));
+await api('post', '/cart/items').set(C).send({ productId: vp.id, variantId: vId('10 kg'), qty: 1 });
+const varOrder = await call('POST /orders (items carry variantId + variantLabel; stock leaves those variants)', api('post', '/orders').set(C).set('Idempotency-Key', 'sample-key-variant').send({ addressId: locId, paymentMethod: 'cod' }));
+
+const cleanVariant = (v) => ({ id: v.id, label: v.label, sku: v.sku, mrp: v.mrp, price: v.price, stock: v.stock, images: v.images, isDefault: v.isDefault, isActive: v.isActive });
+await call('PATCH /admin/products/:id (variants: update by id, add one without id, leave one out = deleted)', api('patch', `/admin/products/${vp.id}`).set(A).send({
+  variants: [
+    { ...cleanVariant(vp.variants[0]), price: 5400, stock: 60 },
+    { ...cleanVariant(vp.variants[1]) },
+    { label: { en: '25 kg', hi: '25 किलो' }, sku: 'ATTA-25', mrp: 130000, price: 115000, stock: 3 },
+  ],
+}));
+await call('POST /orders/:id/reorder (the 10 kg variant was deleted -> skipped with reason "inactive")', api('post', `/orders/${varOrder.body.data.id}/reorder`).set(C).send());
+await api('delete', '/cart').set(C);
+
+await call('PATCH /admin/products/bulk (variantId: one variant per row)', api('patch', '/admin/products/bulk').set(A).send([
+  { id: vp.id, variantId: vId('1 kg'), price: 5300, stock: 55 },
+  { id: vp.id, variantId: vId('5 kg'), isActive: false },
+  { id: vp.id, price: 100 },
+]));
+await call('GET /admin/products?lowStock=true (variant level: any active variant at or below the threshold)', api('get', '/admin/products').set(A).query({ lowStock: 'true', q: 'aashirvaad select', limit: 2 }));
+await call('GET /admin/reports/top-products (one row per variant, with variantLabel)', api('get', '/admin/reports/top-products').set(A).query({ limit: 3 }));
+
+// CSV: one row per variant (the response is long, so show the header and this product's rows)
+const csvRes = await api('get', '/admin/products/export').set(A);
+const csvLines = csvRes.text.replace(/^﻿/, '').split(/\r?\n/).filter(Boolean);
+samples.push({
+  title: 'GET /admin/products/export (a product with variants gets one row per variant)',
+  method: 'GET', url: `${base}/admin/products/export`, status: csvRes.status, body: null,
+  text: [csvLines[0], ...csvLines.filter((l) => l.includes('aashirvaad-select-atta'))].join('\n'),
+  note: 'Header plus the rows of the variant product only (the real file has one row per product / variant). On a variant row mrp / price / stock / isActive belong to the variant and `unit` is its English label.',
+});
+const variantCsv = [
+  'id,variant_id,variant_label_en,variant_label_hi,sku,slug,title_en,title_hi,option_name_en,option_name_hi,category_slug,brand,unit,mrp,price,stock,isActive',
+  `${vp.id},${vId('1 kg')},,,,aashirvaad-select-atta,,,,,,,,,5250,48,`,
+  `,,500 g,500 ग्राम,ATTA-500,aashirvaad-select-atta,,,,,,,,3500,3100,20,`,
+  `${vp.id},${vId('1 kg')},,,,aashirvaad-select-atta,,,,,,,,,9999999,,`,
+].join('\n');
+const attachVariantCsv = (r) => r.attach('file', Buffer.from(variantCsv, 'utf8'), { filename: 'products.csv', contentType: 'text/csv' });
+await call('POST /admin/products/import?dryRun=true (variant rows: update by variant_id, add a variant by label, one bad row)', attachVariantCsv(api('post', '/admin/products/import').query({ dryRun: 'true' }).set(A)));
+
 // ---- reviews moderation
-await call('GET /admin/reviews', api('get', '/admin/reviews').set(A));
+await call('GET /admin/reviews?status=pending', api('get', '/admin/reviews').set(A).query({ status: 'pending' }));
+await call('PATCH /admin/reviews/:id/status (approve: returns the review + the product\'s recalculated rating)', api('patch', `/admin/reviews/${rev.body.data.id}/status`).set(A).send({ status: 'approved', note: 'Genuine review' }));
+await call('GET /products/:id/reviews (public: now shows the approved review)', api('get', `/products/${atta.id}/reviews`));
+await call('GET /admin/reviews (every status)', api('get', '/admin/reviews').set(A));
+await call('PATCH /admin/reviews/:id/status (reject: the rating drops it again)', api('patch', `/admin/reviews/${rev.body.data.id}/status`).set(A).send({ status: 'rejected', note: 'Changed my mind' }));
 await call('DELETE /admin/reviews/:id (ratingAvg / ratingCount recalculated)', api('delete', `/admin/reviews/${rev.body.data.id}`).set(A));
 
 // ---- push (web-push is stubbed: no network); show what the browser would receive
@@ -282,6 +357,32 @@ samples.push({
   method: 'PUSH', url: `to ${pushed[0]?.endpoint}`, status: null, body: pushed[0]?.payload, text: null,
   note: 'Sent with web-push after PATCH /admin/orders/:id/status (also after rider actions and a confirmed payment). Bilingual because customers have no stored language. 404/410 from the push service deletes the subscription.',
 });
+// ---- rider push: assign / reassign (same stubbed transport; payloads are what the rider's service worker receives)
+const rider2 = await api('post', '/admin/riders').set(A).send({ name: 'Suresh Verma', mobile: '9877700002' });
+const riderSub = {
+  endpoint: 'https://fcm.googleapis.com/fcm/send/rider-device-token',
+  expirationTime: null,
+  keys: { p256dh: Buffer.alloc(65, 3).toString('base64url'), auth: Buffer.alloc(16, 5).toString('base64url') },
+};
+await call('POST /me/push-subscriptions (with a RIDER token)', api('post', '/me/push-subscriptions').set(R).send(riderSub));
+pushed.length = 0;
+await api('patch', `/admin/orders/${onlineId}/assign`).set(A).send({ riderId: rider.body.data.id });
+await push.flushPushQueue();
+const toRider = () => pushed.filter((p) => p.endpoint === riderSub.endpoint);
+samples.push({
+  title: 'Web Push to a rider when an order is assigned to them',
+  method: 'PUSH', url: `to ${riderSub.endpoint}`, status: null, body: toRider()[0]?.payload, text: null,
+  note: 'Sent after PATCH /admin/orders/:id/assign. body = "#" + last 6 characters of the order number + the area (address line 2, else the city). Never the customer\'s phone, the delivery OTP or the door number.',
+});
+pushed.length = 0;
+await call('PATCH /admin/orders/:id/assign (to another rider: both riders are notified)', api('patch', `/admin/orders/${onlineId}/assign`).set(A).send({ riderId: rider2.body.data.id }));
+await push.flushPushQueue();
+samples.push({
+  title: 'Web Push to the PREVIOUS rider when their order is given to someone else',
+  method: 'PUSH', url: `to ${riderSub.endpoint}`, status: null, body: toRider()[0]?.payload, text: null,
+  note: 'Also sent when the order is un-assigned (riderId: null). The new rider gets the "New delivery" message at the same time.',
+});
+
 await call('DELETE /me/push-subscriptions', api('delete', '/me/push-subscriptions').set(C).send({ endpoint: browserSub.endpoint }));
 
 // ---- error examples from the new store rules ----

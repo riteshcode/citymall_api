@@ -1,10 +1,15 @@
 import mongoose from 'mongoose';
 import { toJSONPlugin } from '../utils/mongoosePlugins.js';
 import { addressSchema } from './shared/address.js';
+import { bilingualSchema } from './shared/bilingual.js';
 
 const orderItemSchema = new mongoose.Schema(
   {
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    // Snapshot of the chosen variant (both null for products without variants / orders from before variants existed).
+    // Stock is returned to this variant if the order is cancelled.
+    variantId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    variantLabel: { type: bilingualSchema, default: null },
     title: {
       en: { type: String, required: true },
       hi: { type: String, required: true },

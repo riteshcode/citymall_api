@@ -353,8 +353,8 @@ describe('Orders — delivery note, address location, delivery OTP, payment retr
       expect(res.body.data.cart.items).toHaveLength(1);
       expect(res.body.data.cart.items[0]).toMatchObject({ productId: product.id, qty: 1 });
       expect(res.body.data.skipped).toEqual([
-        { productId: product.id, title: { en: 'Test Product', hi: 'टेस्ट प्रोडक्ट' }, reason: 'qty_reduced', requested: 2, added: 1 },
-        { productId: other.id, title: { en: 'Biscuits', hi: 'बिस्कुट' }, reason: 'inactive', requested: 1, added: 0 },
+        { productId: product.id, variantId: null, variantLabel: null, title: { en: 'Test Product', hi: 'टेस्ट प्रोडक्ट' }, reason: 'qty_reduced', requested: 2, added: 1 },
+        { productId: other.id, variantId: null, variantLabel: null, title: { en: 'Biscuits', hi: 'बिस्कुट' }, reason: 'inactive', requested: 1, added: 0 },
       ]);
 
       await request(app).delete(`${base}/cart`).set(h);

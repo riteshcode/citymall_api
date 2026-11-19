@@ -7,7 +7,7 @@ import { ErrorCodes } from '../utils/errorCodes.js';
 import { containsRegex } from '../utils/regex.js';
 import { paginateQuery } from '../utils/mongoosePlugins.js';
 import { generateDeliveryOtp } from '../utils/generators.js';
-import { notifyOrderStatusChange } from './push.service.js';
+import { notifyOrderStatusChange, notifyRiderAssigned, notifyRiderUnassigned } from './push.service.js';
 
 const ACTIVE_DELIVERY_STATUSES = ['confirmed', 'packed', 'shipped', 'out_for_delivery'];
 const CUSTOMER_CARD = { path: 'user', select: 'name mobile' };
@@ -79,10 +79,17 @@ export async function assignRider(orderId, riderId) {
     if (!rider.isActive) throw ApiError.badRequest(ErrorCodes.ORDER_NOT_ASSIGNABLE, 'This rider is inactive');
   }
 
+  const previousRiderId = order.rider ? order.rider.toString() : null;
   order.rider = riderId;
   // Orders placed before delivery OTPs existed get one now, so every delivery is OTP-protected.
   if (riderId !== null && !order.deliveryOtp) order.deliveryOtp = generateDeliveryOtp();
   await order.save();
+
+  // Push (fire-and-forget; never contains the customer's phone or the delivery OTP). Re-assigning the same rider is a no-op.
+  if (riderId !== previousRiderId) {
+    if (riderId !== null) notifyRiderAssigned(riderId, order);
+    if (previousRiderId !== null) notifyRiderUnassigned(previousRiderId, order);
+  }
   return order.populate([CUSTOMER_CARD, { path: 'rider', select: 'name mobile' }]);
 }
 

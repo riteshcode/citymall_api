@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "9f2b6f1a-2b3a-4c1d-9e3a-aali-market-api",
     "name": "Aali Market API",
-    "description": "Price-first mobile shopping API for small-town India. All money is integer paise. Bilingual fields are { en, hi }. Every response is { success, data, error }.\n\nFlow to try this collection end to end:\n1. Auth > Send OTP, check the server console for the printed code (SMS_PROVIDER=console in dev), then Auth > Verify OTP (auto-saves accessToken/refreshToken).\n2. Catalog > List Categories / List Products (auto-saves categoryId/productId/productSlug).\n3. Cart > Add Item, Apply Coupon (code AALI50, needs subtotal >= ₹199).\n4. Addresses > Create Address (auto-saves addressId).\n5. Orders > Create Order (auto-saves orderId) — Idempotency-Key header uses the {{$guid}} dynamic variable, so re-sending the exact same request body+key replays the same order.\n6. Admin folder uses its own adminAccessToken — Send/Verify OTP with the seeded admin mobile (9999999999 by default).\n\nNew in this version: Catalog > Suggest Products / Store Settings, Orders > Create Order (UPI), Payments > Verify Payment, and Admin > Dashboard, Orders, Settings, Pincodes, plus inactive-inclusive product/category/banner lists.\n\nAlso in this version: Orders > Pay Again / Switch Payment to COD / Reorder, Push (PWA), Rider (login + deliver with OTP), and Admin > Riders, Reports, Reviews, bulk/CSV product tools, Assign Rider, Latest Orders, Update Store Info.",
+    "description": "Price-first mobile shopping API for small-town India. All money is integer paise. Bilingual fields are { en, hi }. Every response is { success, data, error }.\n\nFlow to try this collection end to end:\n1. Auth > Send OTP, check the server console for the printed code (SMS_PROVIDER=console in dev), then Auth > Verify OTP (auto-saves accessToken/refreshToken).\n2. Catalog > List Categories / List Products (auto-saves categoryId/productId/productSlug).\n3. Cart > Add Item, Apply Coupon (code AALI50, needs subtotal >= ₹199).\n4. Addresses > Create Address (auto-saves addressId).\n5. Orders > Create Order (auto-saves orderId) — Idempotency-Key header uses the {{$guid}} dynamic variable, so re-sending the exact same request body+key replays the same order.\n6. Admin folder uses its own adminAccessToken — Send/Verify OTP with the seeded admin mobile (9999999999 by default).\n\nNew in this version: Catalog > Suggest Products / Store Settings, Orders > Create Order (UPI), Payments > Verify Payment, and Admin > Dashboard, Orders, Settings, Pincodes, plus inactive-inclusive product/category/banner lists.\n\nAlso in this version: Orders > Pay Again / Switch Payment to COD / Reorder, Push (PWA), Rider (login + deliver with OTP), and Admin > Riders, Reports, Reviews, bulk/CSV product tools, Assign Rider, Latest Orders, Update Store Info.\n\nAlso in this version: product variants (Admin > Products > Create Product (with variants) / Update Product Variants / Bulk Update (variant rows); Cart > Add Item (variant) ...; Catalog > Get Product (with variants)), review approval (Catalog > My Review of a Product; Admin > Reviews > Approve / Reject), and rider push notifications (Rider > Rider - Subscribe to Push).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -158,6 +158,21 @@
     },
     {
       "key": "deliveryOtp",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "variantProductId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "variantId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "variantId2",
       "value": "",
       "type": "string"
     }
@@ -628,7 +643,8 @@
                   "value": "20"
                 }
               ]
-            }
+            },
+            "description": "Public. Only APPROVED reviews are listed (new reviews wait for an admin). No moderation fields."
           }
         },
         {
@@ -670,8 +686,71 @@
                 "reviews"
               ]
             },
-            "description": "Requires the user to have a DELIVERED order containing this product — otherwise returns REVIEW_REQUIRES_DELIVERED_ORDER."
+            "description": "Needs a delivered order containing the product. The review comes back with status \"pending\" and does not change the rating until an admin approves it (Admin > Reviews > Approve Review). One review per product, whatever its status."
           }
+        },
+        {
+          "name": "My Review of a Product (any status)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/{{productId}}/reviews/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "{{productId}}",
+                "reviews",
+                "mine"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "The caller's own review in ANY status (pending / approved / rejected) or data: null. Use it to show \"Your review was sent for approval\". Only the status is shown, never the admin's note."
+          }
+        },
+        {
+          "name": "Get Product (with variants)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/products/aashirvaad-select-atta",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "products",
+                "aashirvaad-select-atta"
+              ]
+            },
+            "description": "A product with variants has optionName and variants[] (id, label, sku, mrp, price, stock, images, isDefault, isActive, discountPercent, inStock). Top-level price / mrp / unit / stock are derived from the default variant / active variants. Customers only get active variants."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var d = pm.response.json().data;",
+                  "if (d && d.variants && d.variants.length) {",
+                  "  pm.collectionVariables.set('variantProductId', d.id);",
+                  "  pm.collectionVariables.set('variantId', d.variants[0].id);",
+                  "  if (d.variants[1]) pm.collectionVariables.set('variantId2', d.variants[1].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -748,7 +827,8 @@
                 "cart",
                 "items"
               ]
-            }
+            },
+            "description": "Plain products: { productId, qty }. For a product with variants also send variantId (400 VARIANT_REQUIRED without it; details.options lists the choices). 404 VARIANT_NOT_FOUND for an unknown / inactive variant."
           }
         },
         {
@@ -790,7 +870,7 @@
                 "{{productId}}"
               ]
             },
-            "description": "qty: 0 removes the item"
+            "description": "qty: 0 removes the item. For a product with variants add ?variantId= (a cart line is product + variant)."
           }
         },
         {
@@ -910,6 +990,129 @@
                 "cart"
               ]
             }
+          }
+        },
+        {
+          "name": "Add Item (variant)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cart/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cart",
+                "items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"productId\":\"{{variantProductId}}\",\"variantId\":\"{{variantId}}\",\"qty\":2}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "Different variants of one product are separate cart lines. Each GET /cart item has variantId, variantLabel { en, hi } and that variant's price / mrp / stock / image / unit."
+          }
+        },
+        {
+          "name": "Update Item Qty (variant)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/cart/items/{{variantProductId}}?variantId={{variantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cart",
+                "items",
+                "{{variantProductId}}"
+              ],
+              "query": [
+                {
+                  "key": "variantId",
+                  "value": "{{variantId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"qty\":3}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "Changes only the line of that variant."
+          }
+        },
+        {
+          "name": "Remove Item (variant)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/cart/items/{{variantProductId}}?variantId={{variantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "cart",
+                "items",
+                "{{variantProductId}}"
+              ],
+              "query": [
+                {
+                  "key": "variantId",
+                  "value": "{{variantId}}"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}"
+                }
+              ]
+            },
+            "description": "Removes only the line of that variant."
           }
         }
       ]
@@ -1450,7 +1653,7 @@
                 }
               ]
             },
-            "description": "Adds the order's items to your cart at today's prices, capped by stock. Response: { cart, skipped: [{ productId, title, reason: inactive | out_of_stock | qty_reduced, requested, added }] }."
+            "description": "Adds the order's items to your cart at today's prices, capped by stock; variants are kept. Response: { cart, skipped: [{ productId, variantId, variantLabel, title, reason: inactive | out_of_stock | qty_reduced, requested, added }] }. A variant that was removed or switched off is skipped as \"inactive\"."
           }
         }
       ]
@@ -1761,7 +1964,7 @@
                     }
                   ]
                 },
-                "description": "isActive=false lists soft-deleted products; re-activate with PATCH { \"isActive\": true }. lowStock = stock <= LOW_STOCK_THRESHOLD."
+                "description": "Includes inactive products and inactive variants. lowStock=true also matches a product when ANY active variant is at or below the threshold."
               }
             },
             {
@@ -1924,7 +2127,7 @@
                     }
                   ]
                 },
-                "description": "Max 200 rows: [{ id, price?, mrp?, stock?, isActive? }]. Each row is validated on its own (price <= mrp against the final values); response { updated, failed: [{ id, error }] }."
+                "description": "Max 200 rows: [{ id, variantId?, price?, mrp?, stock?, isActive? }]. Each row is validated on its own (price <= mrp against the final values); response { updated, failed: [{ id, variantId?, error }] }. With variantId the row changes that variant; on a product with variants a row without variantId may only send isActive."
               }
             },
             {
@@ -1952,7 +2155,7 @@
                     }
                   ]
                 },
-                "description": "All products incl. inactive. Columns: id, slug, title_en, title_hi, category_slug, brand, unit, mrp, price, stock, isActive. Money in PAISE. UTF-8 with BOM (Excel-friendly). Use Send and Download."
+                "description": "All products incl. inactive, ONE ROW PER VARIANT for products with variants. Columns: id, variant_id, variant_label_en, variant_label_hi, sku, slug, title_en, title_hi, option_name_en, option_name_hi, category_slug, brand, unit, mrp, price, stock, isActive. Money in PAISE. UTF-8 with BOM (Excel-friendly). Use Send and Download."
               }
             },
             {
@@ -1996,7 +2199,7 @@
                     }
                   ]
                 },
-                "description": "Multipart field \"file\" (.csv, max 2 MB, max 2000 rows) in the export format. A row with an id updates that product; otherwise the slug decides. On updates blank cells = unchanged. dryRun=true validates and counts, writes nothing. Response { created, updated, errors: [{ row, error }], dryRun } (header = row 1)."
+                "description": "Multipart field \"file\" (.csv, max 2 MB, max 2000 rows) in the export format. A row with an id updates that product; otherwise the slug decides. On updates blank cells = unchanged. dryRun=true validates and counts, writes nothing. Response { created, updated, errors: [{ row, error }], dryRun } (header = row 1). Variant rows: fill variant_id (or variant_label_en / _hi) to change ONE variant — found by id, else by English label, else created (needs both labels, mrp, price, stock and option_name_en/hi). The first variant of a new product becomes the default. The CSV never deletes variants. Old files without the variant columns still import."
               }
             },
             {
@@ -2034,7 +2237,148 @@
                     }
                   ]
                 },
-                "description": "Same as the dry run but writes the valid rows."
+                "description": "Same as the dry run but writes the valid rows. Variant rows: fill variant_id (or variant_label_en / _hi) to change ONE variant — found by id, else by English label, else created (needs both labels, mrp, price, stock and option_name_en/hi). The first variant of a new product becomes the default. The CSV never deletes variants. Old files without the variant columns still import."
+              }
+            },
+            {
+              "name": "Create Product (with variants)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/products",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "products"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"title\":{\"en\":\"Aashirvaad Select Atta\",\"hi\":\"आशीर्वाद सेलेक्ट आटा\"},\"slug\":\"aashirvaad-select-atta\",\"description\":{\"en\":\"Whole wheat flour, sold in three pack sizes.\",\"hi\":\"गेहूं का आटा, तीन पैक साइज़ में।\"},\"category\":\"{{categoryId}}\",\"brand\":\"Aashirvaad\",\"images\":[],\"optionName\":{\"en\":\"Pack size\",\"hi\":\"पैक साइज़\"},\"variants\":[{\"label\":{\"en\":\"1 kg\",\"hi\":\"1 किलो\"},\"sku\":\"ATTA-1\",\"mrp\":6000,\"price\":5200,\"stock\":40,\"isDefault\":true},{\"label\":{\"en\":\"5 kg\",\"hi\":\"5 किलो\"},\"sku\":\"ATTA-5\",\"mrp\":27500,\"price\":24900,\"stock\":25},{\"label\":{\"en\":\"10 kg\",\"hi\":\"10 किलो\"},\"sku\":\"ATTA-10\",\"mrp\":55000,\"price\":47000,\"stock\":8}]}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "price / mrp / unit / stock are DERIVED: default variant's price, mrp and unit (its English label); stock = total of the active variants. Rules: max 20 variants, labels unique (en and hi), sku unique, exactly one isDefault and it must be active, price <= mrp, optionName required."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "  var d = pm.response.json().data;",
+                      "  pm.collectionVariables.set('variantProductId', d.id);",
+                      "  pm.collectionVariables.set('variantId', d.variants[0].id);",
+                      "  pm.collectionVariables.set('variantId2', d.variants[1].id);",
+                      "}"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Update Product Variants",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/products/{{variantProductId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "products",
+                    "{{variantProductId}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"variants\":[{\"id\":\"{{variantId}}\",\"label\":{\"en\":\"1 kg\",\"hi\":\"1 किलो\"},\"sku\":\"ATTA-1\",\"mrp\":6000,\"price\":5400,\"stock\":60,\"isDefault\":true,\"isActive\":true},{\"id\":\"{{variantId2}}\",\"label\":{\"en\":\"5 kg\",\"hi\":\"5 किलो\"},\"sku\":\"ATTA-5\",\"mrp\":27500,\"price\":24900,\"stock\":25,\"isDefault\":false,\"isActive\":true},{\"label\":{\"en\":\"25 kg\",\"hi\":\"25 किलो\"},\"sku\":\"ATTA-25\",\"mrp\":130000,\"price\":115000,\"stock\":3}]}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "`variants` is the COMPLETE list: with id = update that variant (404 VARIANT_NOT_FOUND for a foreign id), without id = create, left out (here: 10 kg) = DELETED (orders keep their snapshot; use isActive:false to merely hide a variant). [] turns the product back into a plain one; omit the key to leave variants alone."
+              }
+            },
+            {
+              "name": "Bulk Update (variant rows)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/products/bulk",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "products",
+                    "bulk"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "[{\"id\":\"{{variantProductId}}\",\"variantId\":\"{{variantId}}\",\"price\":5300,\"stock\":55},{\"id\":\"{{variantProductId}}\",\"variantId\":\"{{variantId2}}\",\"isActive\":false}]",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "One variant per row. The product's price / mrp / unit / stock are re-derived. A variant row cannot switch the default variant off."
               }
             }
           ]
@@ -2574,7 +2918,7 @@
                     }
                   ]
                 },
-                "description": "todayOrders, todayRevenue (paise), pendingOrders (placed/confirmed/packed), outForDelivery, lowStockCount, totalCustomers. \"Today\" = IST day."
+                "description": "todayOrders, todayRevenue (paise), pendingOrders (placed/confirmed/packed), outForDelivery, lowStockCount, totalCustomers. \"Today\" = IST day. pendingReviews = reviews waiting for approval; lowStockCount counts a product with variants once when any active variant is low."
               }
             },
             {
@@ -2791,7 +3135,7 @@
                     }
                   ]
                 },
-                "description": "riderId null unassigns. 400 ORDER_NOT_ASSIGNABLE for delivered/cancelled orders or an inactive rider. The response never contains deliveryOtp."
+                "description": "riderId null unassigns. 400 ORDER_NOT_ASSIGNABLE for delivered/cancelled orders or an inactive rider. The response never contains deliveryOtp. The new rider gets a web push { title: \"New delivery / नई डिलीवरी\", body: \"#<last 6 of orderNumber>, <area or city>\", url: \"/rider\" }; the previous rider (reassigned or unassigned) gets \"Order reassigned / ऑर्डर बदला गया\". Same rider again = no push. Never the customer's phone or the delivery OTP."
               }
             },
             {
@@ -3348,7 +3692,7 @@
                     }
                   ]
                 },
-                "description": "→ [{ productId, title, qtySold, revenue }]"
+                "description": "-> [{ productId, variantId, variantLabel, title, qtySold, revenue }] — one row per variant (variantId / variantLabel are null for products without variants)."
               }
             },
             {
@@ -3396,7 +3740,7 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{baseUrl}}/admin/reviews?page=1&limit=20",
+                  "raw": "{{baseUrl}}/admin/reviews?page=1&limit=20&status=pending",
                   "host": [
                     "{{baseUrl}}"
                   ],
@@ -3412,6 +3756,10 @@
                     {
                       "key": "limit",
                       "value": "20"
+                    },
+                    {
+                      "key": "status",
+                      "value": "pending"
                     },
                     {
                       "key": "productId",
@@ -3433,7 +3781,8 @@
                       "value": "{{adminAccessToken}}"
                     }
                   ]
-                }
+                },
+                "description": "status = pending | approved | rejected (omit for every status). Items have status, moderatedAt, moderationNote, user { name, mobile }, product { title, slug }."
               },
               "event": [
                 {
@@ -3473,6 +3822,92 @@
                   ]
                 },
                 "description": "Also recalculates the product's ratingAvg / ratingCount."
+              }
+            },
+            {
+              "name": "Approve Review",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/reviews/{{reviewId}}/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "reviews",
+                    "{{reviewId}}",
+                    "status"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"status\":\"approved\",\"note\":\"Genuine review\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Shows the review on the storefront and recomputes the product rating from approved reviews. Returns { review, product: { id, ratingAvg, ratingCount } }. The note is internal."
+              }
+            },
+            {
+              "name": "Reject Review",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/reviews/{{reviewId}}/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "reviews",
+                    "{{reviewId}}",
+                    "status"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\"status\":\"rejected\",\"note\":\"Spam\"}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{adminAccessToken}}"
+                    }
+                  ]
+                },
+                "description": "Hides it (also if it was approved before) and recomputes the rating."
               }
             }
           ]
@@ -3801,6 +4236,47 @@
               ]
             },
             "description": "otp is a STRING (leading zeros). Unpaid COD requires cashCollected (paise) and becomes paid. Wrong OTP: 400 INVALID_DELIVERY_OTP (details.attemptsLeft); after 5 wrong tries 429 DELIVERY_OTP_LOCKED."
+          }
+        },
+        {
+          "name": "Rider - Subscribe to Push",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me/push-subscriptions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "me",
+                "push-subscriptions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"endpoint\":\"https://fcm.googleapis.com/fcm/send/REPLACE_WITH_REAL_TOKEN\",\"expirationTime\":null,\"keys\":{\"p256dh\":\"BASE64URL_65_BYTE_PUBLIC_KEY\",\"auth\":\"BASE64URL_16_BYTE_SECRET\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{riderAccessToken}}"
+                }
+              ]
+            },
+            "description": "Same endpoint as customers, with the RIDER token. The rider is then notified when an order is assigned to / taken from them (open /rider on click)."
           }
         }
       ]

@@ -202,6 +202,7 @@ describe('Admin — stats and customers', () => {
     expect(res.body.data).toEqual({
       todayOrders: 1,
       todayRevenue: todayOrder.pricing.total,
+      pendingReviews: 0,
       pendingOrders: 1, // todayOrder only: cancelled is closed, `old` is out_for_delivery
       outForDelivery: 1,
       lowStockCount: 1,

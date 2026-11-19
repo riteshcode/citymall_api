@@ -1,5 +1,7 @@
 import { Order } from '../models/Order.js';
 import { Product } from '../models/Product.js';
+import { Review } from '../models/Review.js';
+import { lowStockFilter } from '../utils/variants.js';
 import { User } from '../models/User.js';
 import { env } from '../config/env.js';
 import { startOfStoreDay } from '../utils/dates.js';
@@ -12,22 +14,25 @@ import { paginateQuery } from '../utils/mongoosePlugins.js';
  *  - todayOrders / todayRevenue: orders placed today, excluding cancelled orders and orders whose
  *    payment failed or was refunded (they didn't earn anything).
  *  - pendingOrders: placed + confirmed + packed (all-time backlog).
- *  - lowStockCount: ACTIVE products at or below LOW_STOCK_THRESHOLD (includes out of stock).
+ *  - lowStockCount: ACTIVE products at or below LOW_STOCK_THRESHOLD (includes out of stock). A product with variants
+ *    counts once when ANY of its active variants is at or below the threshold.
+ *  - pendingReviews: reviews waiting for the admin's approval.
  *  - totalCustomers: users with role "customer".
  */
 export async function getDashboardStats() {
   const todayStart = startOfStoreDay();
   const earning = EARNING_ORDER_FILTER;
 
-  const [today, pendingOrders, outForDelivery, lowStockCount, totalCustomers] = await Promise.all([
+  const [today, pendingOrders, outForDelivery, lowStockCount, totalCustomers, pendingReviews] = await Promise.all([
     Order.aggregate([
       { $match: { createdAt: { $gte: todayStart }, ...earning } },
       { $group: { _id: null, orders: { $sum: 1 }, revenue: { $sum: '$pricing.total' } } },
     ]),
     Order.countDocuments({ status: { $in: ['placed', 'confirmed', 'packed'] } }),
     Order.countDocuments({ status: 'out_for_delivery' }),
-    Product.countDocuments({ isActive: true, stock: { $lte: env.lowStockThreshold } }),
+    Product.countDocuments({ isActive: true, ...lowStockFilter(env.lowStockThreshold) }),
     User.countDocuments({ role: 'customer' }),
+    Review.countDocuments({ status: 'pending' }),
   ]);
 
   return {
@@ -37,6 +42,7 @@ export async function getDashboardStats() {
     outForDelivery,
     lowStockCount,
     totalCustomers,
+    pendingReviews,
   };
 }
 
@@ -80,11 +86,13 @@ export async function listAdminProducts({ page, limit, q, category, isActive, lo
   const filter = {};
   if (category) filter.category = category;
   if (isActive !== undefined) filter.isActive = isActive;
-  if (lowStock) filter.stock = { $lte: env.lowStockThreshold };
+  const and = [];
+  if (lowStock) and.push(lowStockFilter(env.lowStockThreshold)); // variant products: any active variant that is low
   if (q) {
     const rx = containsRegex(q);
-    filter.$or = [{ 'title.en': rx }, { 'title.hi': rx }, { slug: rx }, { brand: rx }, { tags: rx }];
+    and.push({ $or: [{ 'title.en': rx }, { 'title.hi': rx }, { slug: rx }, { brand: rx }, { tags: rx }] });
   }
+  if (and.length) filter.$and = and;
 
   return paginateQuery(Product, filter, {
     page,

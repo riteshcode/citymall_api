@@ -3,7 +3,7 @@ import { sendSuccess } from '../utils/ApiResponse.js';
 import { Product } from '../models/Product.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
-import { mergeBilingualFields } from '../utils/mongoosePlugins.js';
+import { publicProductJSON } from '../utils/variants.js';
 import * as productService from '../services/product.service.js';
 
 export const listProducts = catchAsync(async (req, res) => {
@@ -17,26 +17,21 @@ export const suggestProducts = catchAsync(async (req, res) => {
 
 export const getProductBySlug = catchAsync(async (req, res) => {
   const product = await productService.getProductBySlug(req.params.slug);
-  sendSuccess(res, { data: product });
+  sendSuccess(res, { data: publicProductJSON(product) });
 });
 
 export const getRelatedProducts = catchAsync(async (req, res) => {
   const products = await productService.getRelatedProducts(req.params.id, req.query.limit);
-  sendSuccess(res, { data: products });
+  sendSuccess(res, { data: products.map(publicProductJSON) });
 });
 
 export const createProduct = catchAsync(async (req, res) => {
-  const product = await Product.create(req.body);
+  const product = await productService.createProduct(req.body);
   sendSuccess(res, { statusCode: 201, data: product });
 });
 
 export const updateProduct = catchAsync(async (req, res) => {
-  const product = await Product.findById(req.params.id);
-  if (!product) throw ApiError.notFound(ErrorCodes.PRODUCT_NOT_FOUND, 'Product not found');
-
-  mergeBilingualFields(product, req.body, ['title', 'description']);
-  Object.assign(product, req.body);
-  await product.save();
+  const product = await productService.updateProduct(req.params.id, req.body);
   sendSuccess(res, { data: product });
 });
 

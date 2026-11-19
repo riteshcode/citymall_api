@@ -6,6 +6,7 @@ import { buildPricing, computeSubtotal } from './pricing.service.js';
 import { getEligibleCoupon } from './coupon.service.js';
 import { getSettings } from './settings.service.js';
 import { resolveDelivery } from './serviceability.service.js';
+import { resolveSellable } from '../utils/variants.js';
 
 async function getOrCreateCart(userId) {
   let cart = await Cart.findOne({ user: userId });
@@ -31,25 +32,29 @@ async function buildCartView(cart, { pincode } = {}) {
 
   for (const item of cart.items) {
     const product = productMap.get(item.product.toString());
-    const isAvailable = Boolean(product && product.isActive);
+    const sellable = resolveSellable(product, item.variantId);
+    const isAvailable = sellable.available;
 
     if (isAvailable) {
-      lineItems.push({ price: product.price, qty: item.qty });
+      lineItems.push({ price: sellable.price, qty: item.qty });
     }
 
+    // price / mrp / stock / unit / image are the VARIANT's when the line has one, else the product's.
     responseItems.push({
       productId: item.product.toString(),
+      variantId: item.variantId ? item.variantId.toString() : null,
+      variantLabel: sellable.variantLabel ?? null,
       title: product ? product.title : null,
       slug: product ? product.slug : null,
-      image: product?.images?.[0] || '',
-      unit: product ? product.unit : null,
-      price: product ? product.price : item.priceAtAdd,
-      mrp: product ? product.mrp : null,
+      image: sellable.image ?? '',
+      unit: product ? sellable.unit : null,
+      price: sellable.price ?? item.priceAtAdd,
+      mrp: sellable.mrp ?? null,
       qty: item.qty,
-      stock: product ? product.stock : 0,
+      stock: sellable.stock ?? 0,
       isAvailable,
-      inStock: isAvailable && product.stock >= item.qty,
-      lineTotal: isAvailable ? product.price * item.qty : 0,
+      inStock: isAvailable && sellable.stock >= item.qty,
+      lineTotal: isAvailable ? sellable.price * item.qty : 0,
     });
   }
 
@@ -87,29 +92,43 @@ export async function getCart(userId, options) {
   return buildCartView(cart, options);
 }
 
-export async function addItem(userId, productId, qty) {
+/** A cart line is identified by (product, variant): two variants of one product are two lines. */
+const sameLine = (item, productId, variantId) =>
+  item.product.toString() === String(productId) && (item.variantId ? item.variantId.toString() : null) === (variantId ? String(variantId) : null);
+
+export async function addItem(userId, productId, variantId, qty) {
   const product = await Product.findById(productId);
-  if (!product || !product.isActive) {
-    throw ApiError.notFound(ErrorCodes.PRODUCT_NOT_FOUND, 'Product not found');
+  const sellable = resolveSellable(product, variantId);
+
+  if (!sellable.available) {
+    if (sellable.reason === 'variant_required') {
+      throw ApiError.badRequest(ErrorCodes.VARIANT_REQUIRED, 'Choose an option (variantId) for this product', {
+        options: product.variants.filter((v) => v.isActive).map((v) => ({ id: v.id, label: v.label })),
+      });
+    }
+    if (sellable.reason === 'inactive' && !sellable.variant) {
+      throw ApiError.notFound(ErrorCodes.PRODUCT_NOT_FOUND, 'Product not found');
+    }
+    throw ApiError.notFound(ErrorCodes.VARIANT_NOT_FOUND, 'This option is not available for the product');
   }
 
   const cart = await getOrCreateCart(userId);
-  const existing = cart.items.find((i) => i.product.toString() === productId);
+  const existing = cart.items.find((i) => sameLine(i, productId, variantId));
 
   if (existing) {
     existing.qty += qty;
-    existing.priceAtAdd = product.price;
+    existing.priceAtAdd = sellable.price;
   } else {
-    cart.items.push({ product: product._id, qty, priceAtAdd: product.price });
+    cart.items.push({ product: product._id, variantId: variantId ?? null, qty, priceAtAdd: sellable.price });
   }
 
   await cart.save();
   return buildCartView(cart);
 }
 
-export async function updateItemQty(userId, productId, qty) {
+export async function updateItemQty(userId, productId, variantId, qty) {
   const cart = await getOrCreateCart(userId);
-  const idx = cart.items.findIndex((i) => i.product.toString() === productId);
+  const idx = cart.items.findIndex((i) => sameLine(i, productId, variantId));
 
   if (idx === -1) {
     if (qty === 0) return buildCartView(cart);
@@ -126,8 +145,8 @@ export async function updateItemQty(userId, productId, qty) {
   return buildCartView(cart);
 }
 
-export async function removeItem(userId, productId) {
-  return updateItemQty(userId, productId, 0);
+export async function removeItem(userId, productId, variantId) {
+  return updateItemQty(userId, productId, variantId, 0);
 }
 
 export async function clearCart(userId) {
@@ -145,11 +164,12 @@ export async function applyCoupon(userId, code) {
   }
 
   const productIds = cart.items.map((i) => i.product);
-  const products = await Product.find({ _id: { $in: productIds }, isActive: true });
+  const products = await Product.find({ _id: { $in: productIds } });
   const productMap = new Map(products.map((p) => [p.id, p]));
   const lineItems = cart.items
-    .filter((i) => productMap.has(i.product.toString()))
-    .map((i) => ({ price: productMap.get(i.product.toString()).price, qty: i.qty }));
+    .map((i) => ({ sellable: resolveSellable(productMap.get(i.product.toString()), i.variantId), qty: i.qty }))
+    .filter((l) => l.sellable.available)
+    .map((l) => ({ price: l.sellable.price, qty: l.qty }));
 
   const subtotal = computeSubtotal(lineItems);
 
@@ -187,22 +207,26 @@ export async function reorder(userId, order) {
 
   for (const item of order.items) {
     const productId = item.product.toString();
-    const product = productMap.get(productId);
+    const variantId = item.variantId ? item.variantId.toString() : null;
+    const sellable = resolveSellable(productMap.get(productId), variantId);
     const entry = (reason, added) => ({
       productId,
+      variantId,
+      variantLabel: item.variantLabel ? { en: item.variantLabel.en, hi: item.variantLabel.hi } : null,
       title: { en: item.title.en, hi: item.title.hi },
       reason,
       requested: item.qty,
       added,
     });
 
-    if (!product || !product.isActive) {
+    // Product / variant switched off or deleted (or a plain item whose product has variants now): nothing to add.
+    if (!sellable.available) {
       skipped.push(entry('inactive', 0));
       continue;
     }
 
-    const line = cart.items.find((i) => i.product.toString() === productId);
-    const room = product.stock - (line ? line.qty : 0);
+    const line = cart.items.find((i) => sameLine(i, productId, variantId));
+    const room = sellable.stock - (line ? line.qty : 0);
     if (room <= 0) {
       skipped.push(entry('out_of_stock', 0));
       continue;
@@ -211,9 +235,9 @@ export async function reorder(userId, order) {
     const add = Math.min(item.qty, room);
     if (line) {
       line.qty += add;
-      line.priceAtAdd = product.price;
+      line.priceAtAdd = sellable.price;
     } else {
-      cart.items.push({ product: product._id, qty: add, priceAtAdd: product.price });
+      cart.items.push({ product: productId, variantId, qty: add, priceAtAdd: sellable.price });
     }
     if (add < item.qty) skipped.push(entry('qty_reduced', add));
   }

@@ -156,8 +156,8 @@ describe('Admin reports', () => {
       const res = await top();
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual([
-        { productId: tea.id, title: { en: 'Tea', hi: 'चाय' }, qtySold: sum(tea), revenue: sum(tea) * 8000 },
-        { productId: biscuits.id, title: { en: 'Biscuits', hi: 'बिस्कुट' }, qtySold: sum(biscuits), revenue: sum(biscuits) * 3000 },
+        { productId: tea.id, variantId: null, variantLabel: null, title: { en: 'Tea', hi: 'चाय' }, qtySold: sum(tea), revenue: sum(tea) * 8000 },
+        { productId: biscuits.id, variantId: null, variantLabel: null, title: { en: 'Biscuits', hi: 'बिस्कुट' }, qtySold: sum(biscuits), revenue: sum(biscuits) * 3000 },
       ]);
       // the cancelled and the payment-failed orders were tea orders and are NOT in that number
       expect(sum(tea)).toBe(1 + 3 + 1 + 1 + 1);

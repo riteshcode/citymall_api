@@ -42,15 +42,20 @@ export async function salesReport({ from, to, groupBy = 'day' }) {
   ]);
 }
 
-/** Best sellers: [{ productId, title, qtySold, revenue }]. Revenue = line totals (price x qty) before any coupon. */
+/**
+ * Best sellers: [{ productId, variantId, variantLabel, title, qtySold, revenue }]. Every variant of a product is its own
+ * row (variantId / variantLabel are null for products without variants). Revenue = line totals (price x qty) before
+ * any coupon.
+ */
 export async function topProductsReport({ from, to, limit = 10 }) {
   const rows = await Order.aggregate([
     { $match: { createdAt: resolveRange({ from, to }), ...EARNING_ORDER_FILTER } },
     { $unwind: '$items' },
     {
       $group: {
-        _id: '$items.product',
+        _id: { product: '$items.product', variantId: { $ifNull: ['$items.variantId', null] } },
         title: { $first: '$items.title' },
+        variantLabel: { $first: { $ifNull: ['$items.variantLabel', null] } },
         qtySold: { $sum: '$items.qty' },
         revenue: { $sum: { $multiply: ['$items.price', '$items.qty'] } },
       },
@@ -59,7 +64,9 @@ export async function topProductsReport({ from, to, limit = 10 }) {
     { $limit: limit },
   ]);
   return rows.map((r) => ({
-    productId: r._id.toString(),
+    productId: r._id.product.toString(),
+    variantId: r._id.variantId ? r._id.variantId.toString() : null,
+    variantLabel: r.variantLabel ? { en: r.variantLabel.en, hi: r.variantLabel.hi } : null,
     title: { en: r.title.en, hi: r.title.hi },
     qtySold: r.qtySold,
     revenue: r.revenue,

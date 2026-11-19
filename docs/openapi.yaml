@@ -92,6 +92,74 @@ components:
         ratingCount: { type: integer }
         tags: { type: array, items: { type: string } }
         isActive: { type: boolean }
+        optionName:
+          allOf: [{ $ref: '#/components/schemas/Bilingual' }]
+          nullable: true
+          description: 'What the options are called, e.g. { en: "Pack size", hi: "पैक साइज़" }. null for a product without variants.'
+        variants:
+          type: array
+          description: >-
+            Empty for a plain product. With variants, price / mrp / unit / stock above are DERIVED by the backend:
+            default variant's price, mrp and (English label as) unit; stock = total of the active variants.
+            Customers only receive active variants; admin endpoints return all.
+          items: { $ref: '#/components/schemas/ProductVariant' }
+
+    ProductVariant:
+      type: object
+      properties:
+        id: { type: string }
+        label: { $ref: '#/components/schemas/Bilingual' }
+        sku: { type: string }
+        mrp: { type: integer, description: paise }
+        price: { type: integer, description: 'paise, never above mrp' }
+        stock: { type: integer }
+        images: { type: array, items: { type: string }, description: 'empty = use the product images' }
+        isDefault: { type: boolean, description: 'exactly one per product; must be active' }
+        isActive: { type: boolean }
+        discountPercent: { type: integer }
+        inStock: { type: boolean }
+
+    VariantInput:
+      type: object
+      required: [label, mrp, price, stock]
+      properties:
+        id: { type: string, description: 'PATCH only: with an id the variant is updated, without one it is created' }
+        label: { $ref: '#/components/schemas/Bilingual' }
+        sku: { type: string }
+        mrp: { type: integer }
+        price: { type: integer }
+        stock: { type: integer, minimum: 0 }
+        images: { type: array, items: { type: string, format: uri } }
+        isDefault: { type: boolean, default: false }
+        isActive: { type: boolean, default: true }
+
+    ProductInput:
+      type: object
+      description: >-
+        mrp / price / unit / stock are required for a product WITHOUT variants. With variants (max 20; labels and skus
+        unique; exactly one active default; each price <= mrp) they are ignored and derived. On PATCH every key is
+        optional; `variants` is the COMPLETE list (with id = update, without = create, left out = deleted; [] = back to a
+        plain product).
+      properties:
+        title: { $ref: '#/components/schemas/Bilingual' }
+        slug: { type: string }
+        description: { $ref: '#/components/schemas/Bilingual' }
+        category: { type: string }
+        brand: { type: string }
+        images: { type: array, items: { type: string, format: uri } }
+        mrp: { type: integer }
+        price: { type: integer }
+        unit: { type: string }
+        stock: { type: integer }
+        optionName:
+          allOf: [{ $ref: '#/components/schemas/Bilingual' }]
+          nullable: true
+        variants:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/VariantInput' }
+        tags: { type: array, items: { type: string } }
+        isActive: { type: boolean }
 
     StoreSettings:
       type: object
@@ -148,6 +216,10 @@ components:
             type: object
             properties:
               productId: { type: string }
+              variantId: { type: string, nullable: true, description: 'null for a product without variants' }
+              variantLabel:
+                allOf: [{ $ref: '#/components/schemas/Bilingual' }]
+                nullable: true
               title: { $ref: '#/components/schemas/Bilingual' }
               image: { type: string }
               unit: { type: string }
@@ -363,13 +435,13 @@ paths:
   /products/{id}/reviews:
     get:
       tags: [Reviews]
-      summary: List reviews for a product
+      summary: List the APPROVED reviews of a product (pending / rejected ones are never shown)
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
         '200': { description: OK }
     post:
       tags: [Reviews]
-      summary: Review a product (requires a delivered order containing it)
+      summary: Review a product (requires a delivered order containing it); starts as pending until an admin approves it
       security: [{ bearerAuth: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
@@ -382,9 +454,20 @@ paths:
                 rating: { type: integer, minimum: 1, maximum: 5 }
                 comment: { type: string }
       responses:
-        '201': { description: Created }
+        '201': { description: 'The review with status "pending"; the product rating does not change until it is approved' }
         '400': { description: REVIEW_REQUIRES_DELIVERED_ORDER }
-        '409': { description: REVIEW_ALREADY_EXISTS }
+        '409': { description: 'REVIEW_ALREADY_EXISTS (one review per product, whatever its status)' }
+
+  /products/{id}/reviews/mine:
+    get:
+      tags: [Reviews]
+      summary: The caller's own review of this product in ANY status (or null)
+      description: 'Lets the product page say "Your review was sent for approval". Only `status` is shown, never the admin note.'
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: 'Review with status pending | approved | rejected, or data: null when the caller has not reviewed it' }
+        '401': { description: UNAUTHORIZED }
 
   /cart:
     get:
@@ -424,17 +507,21 @@ paths:
               required: [productId]
               properties:
                 productId: { type: string }
+                variantId: { type: string, description: 'REQUIRED for a product with variants' }
                 qty: { type: integer, default: 1, minimum: 1 }
       responses:
         '201': { description: Created }
-        '404': { description: PRODUCT_NOT_FOUND }
+        '400': { description: 'VARIANT_REQUIRED (the product has variants; details.options lists the active ones)' }
+        '404': { description: 'PRODUCT_NOT_FOUND | VARIANT_NOT_FOUND (unknown, inactive or another product''s variant)' }
 
   /cart/items/{productId}:
     patch:
       tags: [Cart]
       summary: Update item quantity (qty 0 removes the item)
       security: [{ bearerAuth: [] }]
-      parameters: [{ name: productId, in: path, required: true, schema: { type: string } }]
+      parameters:
+        - { name: productId, in: path, required: true, schema: { type: string } }
+        - { name: variantId, in: query, schema: { type: string }, description: 'the line is (product, variant): send it for a product with variants' }
       requestBody:
         content:
           application/json:
@@ -448,7 +535,9 @@ paths:
       tags: [Cart]
       summary: Remove an item from the cart
       security: [{ bearerAuth: [] }]
-      parameters: [{ name: productId, in: path, required: true, schema: { type: string } }]
+      parameters:
+        - { name: productId, in: path, required: true, schema: { type: string } }
+        - { name: variantId, in: query, schema: { type: string }, description: 'removes only that variant''s line' }
       responses:
         '200': { description: OK }
 
@@ -621,13 +710,18 @@ paths:
         - { name: q, in: query, schema: { type: string }, description: 'substring of title (en/hi), slug, brand or tag' }
         - { name: category, in: query, schema: { type: string } }
         - { name: isActive, in: query, schema: { type: string, enum: ['true', 'false'] } }
-        - { name: lowStock, in: query, schema: { type: string, enum: ['true', 'false'] }, description: 'stock <= LOW_STOCK_THRESHOLD' }
+        - { name: lowStock, in: query, schema: { type: string, enum: ['true', 'false'] }, description: 'stock <= LOW_STOCK_THRESHOLD; for a product with variants: ANY active variant at or below it' }
       responses:
         '200': { description: OK }
     post:
       tags: [Admin]
-      summary: Create a product (admin only)
+      summary: Create a product, optionally with optionName + variants (admin only)
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
       responses:
         '201': { description: Created }
         '403': { description: FORBIDDEN }
@@ -635,11 +729,18 @@ paths:
   /admin/products/{id}:
     patch:
       tags: [Admin]
-      summary: Update a product (admin only)
+      summary: Update a product incl. its variants (admin only)
       security: [{ bearerAuth: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
       responses:
         '200': { description: OK }
+        '400': { description: VALIDATION_ERROR (duplicate labels, not exactly one active default, price above mrp, more than 20 variants) }
+        '404': { description: 'PRODUCT_NOT_FOUND | VARIANT_NOT_FOUND (a variant id that is not this product''s)' }
     delete:
       tags: [Admin]
       summary: Soft-delete a product (admin only)
@@ -806,8 +907,9 @@ paths:
                           todayRevenue: { type: integer }
                           pendingOrders: { type: integer, description: 'placed + confirmed + packed' }
                           outForDelivery: { type: integer }
-                          lowStockCount: { type: integer }
+                          lowStockCount: { type: integer, description: 'active products at or below the threshold (variant products: any active variant)' }
                           totalCustomers: { type: integer }
+                          pendingReviews: { type: integer, description: 'reviews waiting for approval' }
 
   /admin/users:
     get:
@@ -957,8 +1059,9 @@ paths:
       responses:
         '200':
           description: >
-            { cart (same shape as GET /cart), skipped: [{ productId, title, reason, requested, added }] };
-            reason is inactive | out_of_stock | qty_reduced. Prices are today's; quantities never exceed stock.
+            { cart (same shape as GET /cart), skipped: [{ productId, variantId, variantLabel, title, reason, requested, added }] };
+            reason is inactive | out_of_stock | qty_reduced. Variants are kept (a variant that was removed or switched off
+            is skipped as inactive). Prices are today's; quantities never exceed the variant's stock.
         '404': { description: ORDER_NOT_FOUND }
 
   /push/vapid-public-key:
@@ -972,7 +1075,7 @@ paths:
   /me/push-subscriptions:
     post:
       tags: [Push]
-      summary: Register the browser's PushSubscription
+      summary: Register the browser's PushSubscription (customer or rider token)
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -1067,7 +1170,7 @@ paths:
   /admin/orders/{id}/assign:
     patch:
       tags: [Admin]
-      summary: Assign (or unassign with null) a delivery rider
+      summary: Assign (or unassign with null) a delivery rider; the rider(s) concerned get a web push
       security: [{ bearerAuth: [] }]
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       requestBody:
@@ -1079,7 +1182,12 @@ paths:
               required: [riderId]
               properties: { riderId: { type: string, nullable: true } }
       responses:
-        '200': { description: 'Order with rider { id, name, mobile }' }
+        '200':
+          description: >-
+            Order with rider { id, name, mobile }. Push (fire-and-forget): the new rider gets
+            { title: "New delivery / नई डिलीवरी", body: "#<last 6 of orderNumber>, <area or city>", url: "/rider" };
+            the previous rider (given to someone else, or unassigned) gets { title: "Order reassigned / ऑर्डर बदला गया", ... }.
+            Same rider again = no push. Never the customer's phone or the delivery OTP.
         '400': { description: 'ORDER_NOT_ASSIGNABLE (delivered / cancelled order, inactive rider)' }
         '404': { description: 'ORDER_NOT_FOUND | RIDER_NOT_FOUND' }
 
@@ -1147,7 +1255,7 @@ paths:
         - { name: to, in: query, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, default: 10, minimum: 1, maximum: 50 } }
       responses:
-        '200': { description: '[{ productId, title {en,hi}, qtySold, revenue (paise, before coupons) }]' }
+        '200': { description: '[{ productId, variantId, variantLabel {en,hi}, title {en,hi}, qtySold, revenue (paise, before coupons) }] - one row per variant; variantId / variantLabel are null for products without variants' }
 
   /admin/reports/cod:
     get:
@@ -1162,7 +1270,7 @@ paths:
   /admin/products/bulk:
     patch:
       tags: [Admin]
-      summary: Bulk update price / mrp / stock / isActive (max 200 rows)
+      summary: Bulk update price / mrp / stock / isActive (max 200 rows), per product or per variant
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -1176,12 +1284,13 @@ paths:
                 required: [id]
                 properties:
                   id: { type: string }
+                  variantId: { type: string, description: 'change this variant instead of the product (the product price / mrp / stock / unit are re-derived)' }
                   price: { type: integer }
                   mrp: { type: integer }
                   stock: { type: integer }
                   isActive: { type: boolean }
       responses:
-        '200': { description: '{ updated, failed: [{ id, error }] } - valid rows are applied even if others fail' }
+        '200': { description: '{ updated, failed: [{ id, variantId?, error }] } - valid rows are applied even if others fail. On a product with variants a row without variantId may only send isActive; a variant row cannot switch the default variant off.' }
 
   /admin/products/export:
     get:
@@ -1190,7 +1299,7 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         '200':
-          description: 'text/csv (UTF-8 with BOM); columns id, slug, title_en, title_hi, category_slug, brand, unit, mrp, price, stock, isActive; money in paise'
+          description: 'text/csv (UTF-8 with BOM); columns id, variant_id, variant_label_en, variant_label_hi, sku, slug, title_en, title_hi, option_name_en, option_name_hi, category_slug, brand, unit, mrp, price, stock, isActive; one row per product, or per variant for a product with variants; money in paise'
           content:
             text/csv:
               schema: { type: string }
@@ -1198,7 +1307,11 @@ paths:
   /admin/products/import:
     post:
       tags: [Admin]
-      summary: Create / update products from a CSV in the export format
+      summary: Create / update products and variants from a CSV in the export format
+      description: >-
+        A row with variant_id or variant_label_en/hi targets one variant (found by id, else by English label, else created;
+        a new variant needs both labels, mrp, price, stock and the product's option_name_en/hi; the first variant of a new
+        product becomes the default). The CSV never deletes variants. Files in the old layout (no variant columns) still work.
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: dryRun, in: query, schema: { type: string, enum: ['true', 'false'], default: 'false' }, description: 'true validates and counts without writing' }
@@ -1225,8 +1338,30 @@ paths:
         - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
         - { name: productId, in: query, schema: { type: string } }
         - { name: rating, in: query, schema: { type: integer, minimum: 1, maximum: 5 } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected] }, description: 'default: every status' }
       responses:
-        '200': { description: 'Reviews with user { name, mobile } and product { title, slug } + meta' }
+        '200': { description: 'Reviews (status, moderatedAt, moderationNote) with user { name, mobile } and product { title, slug } + meta' }
+
+  /admin/reviews/{id}/status:
+    patch:
+      tags: [Admin]
+      summary: Approve or reject a review (can be changed again later)
+      security: [{ bearerAuth: [] }]
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [approved, rejected] }
+                note: { type: string, minLength: 1, maxLength: 300, description: 'internal moderation note (never shown to customers)' }
+      responses:
+        '200': { description: '{ review (with user, product), product: { id, ratingAvg, ratingCount } } - the rating is recomputed from approved reviews' }
+        '400': { description: VALIDATION_ERROR }
+        '404': { description: REVIEW_NOT_FOUND }
 
   /admin/reviews/{id}:
     delete:

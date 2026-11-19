@@ -12,7 +12,7 @@ import {
   relatedProductsSchema,
   suggestProductsSchema,
 } from '../validations/product.validation.js';
-import { createReviewSchema, listReviewsSchema } from '../validations/review.validation.js';
+import { createReviewSchema, listReviewsSchema, myReviewSchema } from '../validations/review.validation.js';
 
 const router = Router();
 
@@ -26,6 +26,7 @@ router.get('/products/:slug', validate(productSlugParamSchema), productControlle
 router.get('/products/:id/related', validate(relatedProductsSchema), productController.getRelatedProducts);
 
 router.get('/products/:id/reviews', validate(listReviewsSchema), reviewController.listReviews);
+router.get('/products/:id/reviews/mine', authenticate, validate(myReviewSchema), reviewController.getMyReview);
 router.post('/products/:id/reviews', authenticate, validate(createReviewSchema), reviewController.createReview);
 
 export default router;

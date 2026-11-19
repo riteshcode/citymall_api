@@ -3,6 +3,7 @@ import { connectDB } from './config/db.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { storageWarnings } from './services/storage.service.js';
+import { runMigrations } from './migrations/index.js';
 
 async function main() {
   if (env.isProd && env.payments.provider === 'mock') {
@@ -10,6 +11,8 @@ async function main() {
   }
   storageWarnings().forEach((w) => logger.warn(w));
   await connectDB();
+  const migrated = await runMigrations();
+  if (migrated.reviewsApproved) logger.info(`Migration: ${migrated.reviewsApproved} pre-moderation review(s) marked approved`);
   const app = createApp();
 
   const server = app.listen(env.port, () => {

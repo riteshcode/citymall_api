@@ -8,17 +8,17 @@ export const getCart = catchAsync(async (req, res) => {
 });
 
 export const addItem = catchAsync(async (req, res) => {
-  const cart = await cartService.addItem(req.user.id, req.body.productId, req.body.qty);
+  const cart = await cartService.addItem(req.user.id, req.body.productId, req.body.variantId, req.body.qty);
   sendSuccess(res, { statusCode: 201, data: cart });
 });
 
 export const updateItem = catchAsync(async (req, res) => {
-  const cart = await cartService.updateItemQty(req.user.id, req.params.productId, req.body.qty);
+  const cart = await cartService.updateItemQty(req.user.id, req.params.productId, req.query.variantId, req.body.qty);
   sendSuccess(res, { data: cart });
 });
 
 export const removeItem = catchAsync(async (req, res) => {
-  const cart = await cartService.removeItem(req.user.id, req.params.productId);
+  const cart = await cartService.removeItem(req.user.id, req.params.productId, req.query.variantId);
   sendSuccess(res, { data: cart });
 });
 

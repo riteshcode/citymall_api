@@ -1,6 +1,7 @@
 import { catchAsync } from '../utils/catchAsync.js';
 import { sendSuccess } from '../utils/ApiResponse.js';
 import { Wishlist } from '../models/Wishlist.js';
+import { publicProductJSON } from '../utils/variants.js';
 
 async function getOrCreateWishlist(userId) {
   let wishlist = await Wishlist.findOne({ user: userId });
@@ -10,7 +11,9 @@ async function getOrCreateWishlist(userId) {
 
 export const getWishlist = catchAsync(async (req, res) => {
   const wishlist = await (await getOrCreateWishlist(req.user.id)).populate('products');
-  sendSuccess(res, { data: wishlist });
+  const json = wishlist.toJSON();
+  json.products = wishlist.products.map(publicProductJSON); // customers never see a switched-off variant
+  sendSuccess(res, { data: json });
 });
 
 export const addToWishlist = catchAsync(async (req, res) => {

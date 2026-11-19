@@ -162,3 +162,27 @@ export function notifyOrderStatusChange(order) {
   task.finally(() => inFlight.delete(task));
   return task;
 }
+
+// ---------------------------------------------------------------- rider notifications
+
+const shortOrderRef = (order) => `#${String(order.orderNumber).slice(-6)}`;
+/** Where to: the area (address line 2) when there is one, else the city. Never the phone, the door number or the OTP. */
+const dropArea = (order) => order.shippingAddress?.line2?.trim() || order.shippingAddress?.city || '';
+
+/** Tells a rider an order was assigned to them: { title, body: "#<last 6 of orderNumber>, <area/city>", url: "/rider" }. */
+export function notifyRiderAssigned(riderId, order) {
+  return notifyUser(riderId, {
+    title: 'New delivery / नई डिलीवरी',
+    body: [shortOrderRef(order), dropArea(order)].filter(Boolean).join(', '),
+    url: '/rider',
+  });
+}
+
+/** Tells a rider an order was taken away from them (given to someone else, or unassigned). */
+export function notifyRiderUnassigned(riderId, order) {
+  return notifyUser(riderId, {
+    title: 'Order reassigned / ऑर्डर बदला गया',
+    body: `${shortOrderRef(order)} is no longer yours / अब आपका नहीं है`,
+    url: '/rider',
+  });
+}

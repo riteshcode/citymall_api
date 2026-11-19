@@ -14,6 +14,7 @@ import { parseDateBoundary } from '../utils/dates.js';
 import { getSettings } from './settings.service.js';
 import { notifyOrderStatusChange } from './push.service.js';
 import { resolveDelivery } from './serviceability.service.js';
+import { resolveSellable, reserveStock, releaseStock } from '../utils/variants.js';
 
 const CANCELLABLE_STATUSES = ['placed', 'confirmed', 'packed'];
 
@@ -68,25 +69,33 @@ export async function createOrder(userId, { addressId, paymentMethod, idempotenc
 
       for (const item of cart.items) {
         const product = productMap.get(item.product.toString());
-        if (!product || !product.isActive) {
-          throw ApiError.badRequest(ErrorCodes.OUT_OF_STOCK, 'One of the items in your cart is no longer available');
+        const sellable = resolveSellable(product, item.variantId);
+        if (!sellable.available) {
+          // inactive / deleted product or variant, or a cart line that predates the product getting variants
+          throw ApiError.badRequest(ErrorCodes.OUT_OF_STOCK, 'One of the items in your cart is no longer available', {
+            productId: item.product.toString(),
+            variantId: item.variantId ? item.variantId.toString() : null,
+          });
         }
-        if (product.stock < item.qty) {
+        const name = sellable.variantLabel ? `${product.title.en} (${sellable.variantLabel.en})` : product.title.en;
+        if (sellable.stock < item.qty) {
           throw ApiError.badRequest(
             ErrorCodes.INSUFFICIENT_STOCK,
-            `Only ${product.stock} unit(s) of "${product.title.en}" are available`,
-            { productId: product.id, available: product.stock }
+            `Only ${sellable.stock} unit(s) of "${name}" are available`,
+            { productId: product.id, variantId: sellable.variantId, available: sellable.stock }
           );
         }
         orderItems.push({
           product: product._id,
+          variantId: sellable.variantId,
+          variantLabel: sellable.variantLabel,
           title: { en: product.title.en, hi: product.title.hi },
-          image: product.images[0] || '',
-          unit: product.unit,
-          price: product.price,
+          image: sellable.image,
+          unit: sellable.unit,
+          price: sellable.price,
           qty: item.qty,
         });
-        lineItems.push({ price: product.price, qty: item.qty });
+        lineItems.push({ price: sellable.price, qty: item.qty });
       }
 
       const subtotal = computeSubtotal(lineItems);
@@ -110,19 +119,16 @@ export async function createOrder(userId, { addressId, paymentMethod, idempotenc
         deliveryFeeOverride: delivery.deliveryFeeOverride,
       });
 
-      // Atomic, condition-checked stock decrement — guards against oversell under concurrent orders.
+      // Atomic, condition-checked stock decrement (from the chosen variant, if any) — guards against oversell
+      // under concurrent orders.
       for (const item of cart.items) {
         const product = productMap.get(item.product.toString());
-        const result = await Product.updateOne(
-          { _id: product._id, stock: { $gte: item.qty } },
-          { $inc: { stock: -item.qty } },
-          { session }
-        );
-        if (result.matchedCount === 0) {
+        const reserved = await reserveStock(product._id, item.variantId, item.qty, session);
+        if (!reserved) {
           throw ApiError.badRequest(
             ErrorCodes.OUT_OF_STOCK,
             `"${product.title.en}" just went out of stock`,
-            { productId: product.id }
+            { productId: product.id, variantId: item.variantId ? item.variantId.toString() : null }
           );
         }
       }
@@ -253,7 +259,7 @@ export async function cancelOrder(userId, orderId, reason) {
       }
 
       for (const item of order.items) {
-        await Product.updateOne({ _id: item.product }, { $inc: { stock: item.qty } }, { session });
+        await releaseStock(item.product, item.variantId, item.qty, session); // back into the same variant
       }
 
       order.status = 'cancelled';

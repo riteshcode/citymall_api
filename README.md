@@ -28,6 +28,7 @@ Production-ready REST API for **Aali Market** — a price-first mobile shopping 
 npm install
 cp .env.example .env   # then fill in real secrets
 npm run seed            # categories, ~40 products, AALI50 coupon, admin user
+npm run migrate         # idempotent data migrations (also run automatically on every server start)
 npm run dev              # http://localhost:4000
 ```
 
@@ -113,19 +114,20 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | GET | `/banners` | List active home-carousel banners |
 | GET | `/products` | Filter/sort/search/paginate products (`meta.total` = "N products") |
 | GET | `/products/suggest?q=` | Type-ahead: top 8 prefix matches (`{ id, slug, title, price, image }`) — "att" finds "atta" |
-| GET | `/products/:slug` | Product detail |
+| GET | `/products/:slug` | Product detail. Has `optionName` and `variants[]` (see [Product variants](#product-variants)); inactive variants are never shown |
 | GET | `/products/:id/related` | Related products (same category) |
-| GET | `/products/:id/reviews` | List reviews for a product |
-| POST | `/products/:id/reviews` 🔒 | Review a product (requires a delivered order containing it) |
+| GET | `/products/:id/reviews` | **Approved** reviews of a product (new ones wait for admin approval) |
+| POST | `/products/:id/reviews` 🔒 | Review a product (requires a delivered order containing it). Returns the review with `status: "pending"` |
+| GET | `/products/:id/reviews/mine` 🔒 | The caller's own review in any status (`pending` / `approved` / `rejected`), or `null` — for "sent for approval" notices |
 
 ### Cart
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/cart` 🔒 | Get cart with full pricing breakdown. Optional `?pincode=` previews that area's delivery-fee override so the total matches checkout |
-| POST | `/cart/items` 🔒 | Add item `{ productId, qty }` |
-| PATCH | `/cart/items/:productId` 🔒 | Update qty (`qty: 0` removes it) |
-| DELETE | `/cart/items/:productId` 🔒 | Remove item |
+| POST | `/cart/items` 🔒 | Add item `{ productId, variantId?, qty }` — `variantId` is required for a product with variants (`400 VARIANT_REQUIRED`) |
+| PATCH | `/cart/items/:productId?variantId=` 🔒 | Update qty (`qty: 0` removes it); send `variantId` for a product with variants |
+| DELETE | `/cart/items/:productId?variantId=` 🔒 | Remove item (that variant's line) |
 | DELETE | `/cart` 🔒 | Clear cart |
 | POST | `/cart/coupon` 🔒 | Apply coupon `{ code }` |
 | DELETE | `/cart/coupon` 🔒 | Remove applied coupon |
@@ -160,13 +162,13 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/admin/stats` | Dashboard: `todayOrders`, `todayRevenue` (paise), `pendingOrders`, `outForDelivery`, `lowStockCount`, `totalCustomers` ("today" = IST day) |
+| GET | `/admin/stats` | Dashboard: `todayOrders`, `todayRevenue` (paise), `pendingOrders`, `outForDelivery`, `lowStockCount` (variant products: any active variant low), `totalCustomers`, `pendingReviews` ("today" = IST day) |
 | GET | `/admin/orders?page&limit&status&from&to&q` | All orders; `q` = orderNumber or customer mobile; `from`/`to` = `YYYY-MM-DD` (whole IST day, inclusive) or ISO datetime; `user` populated as `{ id, name, mobile }` |
 | GET | `/admin/orders/:id` | One order + full customer card |
 | PATCH | `/admin/orders/:id/status` | Transition order status |
 | GET | `/admin/users?page&limit&q` | Customers with `ordersCount` |
 | GET | `/admin/products?page&limit&q&category&isActive&lowStock` | Products incl. inactive (soft-deleted can be re-activated with `PATCH { isActive: true }`) |
-| POST/PATCH/DELETE | `/admin/products`, `/admin/products/:id` | Product CRUD (DELETE = soft) |
+| POST/PATCH/DELETE | `/admin/products`, `/admin/products/:id` | Product CRUD (DELETE = soft). POST / PATCH take `optionName` + `variants` — see [Product variants](#product-variants) |
 | GET | `/admin/categories`, `/admin/banners` | All rows incl. inactive |
 | POST/PATCH/DELETE | `/admin/categories`, `/admin/categories/:id` | Category CRUD |
 | GET/POST/PATCH/DELETE | `/admin/coupons`, `/admin/coupons/:id` | Coupon CRUD |
@@ -179,12 +181,13 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | GET/POST | `/admin/riders` | List / create delivery riders `{ name, mobile, isActive }` (`activeOrders` count included). Riders sign in with the normal OTP flow |
 | PATCH | `/admin/riders/:id` | Change `name`, `mobile`, `isActive` (inactive = cannot log in, tokens stop working) |
 | GET | `/admin/reports/sales?from&to&groupBy=day\|week\|month` | `[{ period, orders, revenue, avgOrderValue }]` (IST periods; week = Monday date; default last 30 days) |
-| GET | `/admin/reports/top-products?from&to&limit=10` | `[{ productId, title, qtySold, revenue }]` |
+| GET | `/admin/reports/top-products?from&to&limit=10` | `[{ productId, variantId, variantLabel, title, qtySold, revenue }]` — one row per variant (`null` for plain products) |
 | GET | `/admin/reports/cod?date=YYYY-MM-DD` | Cash reconciliation: `{ totalExpected, totalCollected, byRider: [{ rider, orders, expected, collected }] }` |
-| PATCH | `/admin/products/bulk` | Body `[{ id, price?, mrp?, stock?, isActive? }]` (max 200) → `{ updated, failed: [{ id, error }] }`; `price <= mrp` checked per row |
-| GET | `/admin/products/export` | All products as CSV (`id, slug, title_en, title_hi, category_slug, brand, unit, mrp, price, stock, isActive`; money in paise; UTF-8 BOM for Excel) |
+| PATCH | `/admin/products/bulk` | Body `[{ id, variantId?, price?, mrp?, stock?, isActive? }]` (max 200) → `{ updated, failed: [{ id, variantId?, error }] }`; `price <= mrp` checked per row; `variantId` changes that variant |
+| GET | `/admin/products/export` | All products as CSV, **one row per variant** (`id, variant_id, variant_label_en, variant_label_hi, sku, slug, title_en, title_hi, option_name_en, option_name_hi, category_slug, brand, unit, mrp, price, stock, isActive`; money in paise; UTF-8 BOM for Excel) |
 | POST | `/admin/products/import?dryRun=true\|false` | Multipart field `file` (.csv, ≤ 2 MB, ≤ 2000 rows) → `{ created, updated, errors: [{ row, error }], dryRun }` |
-| GET | `/admin/reviews?page&limit&productId&rating` | Reviews with `user { name, mobile }` and `product { title, slug }` |
+| GET | `/admin/reviews?page&limit&productId&rating&status` | Reviews of every status (or `status=pending\|approved\|rejected`) with `user { name, mobile }` and `product { title, slug }` |
+| PATCH | `/admin/reviews/:id/status` | `{ status: "approved" \| "rejected", note? }` → `{ review, product: { id, ratingAvg, ratingCount } }` |
 | DELETE | `/admin/reviews/:id` | Removes the review and recalculates the product's `ratingAvg` / `ratingCount` |
 
 ### Rider app (`role: rider`)
@@ -204,6 +207,23 @@ All routes are prefixed with `API_BASE_PATH` (default `/api/v1`). 🔒 = require
 | DELETE | `/me/push-subscriptions` 🔒 | `{ endpoint }` |
 
 On an order status change (admin, rider, confirmed payment) every device of the customer gets `{ title, body, url: "/orders/<id>" }` (English + Hindi). A `404`/`410` from the push service deletes that subscription. Failures never affect the API call.
+
+**Riders** subscribe with the same endpoints and their rider token. `PATCH /admin/orders/:id/assign` pushes the new rider `{ title: "New delivery / नई डिलीवरी", body: "#<last 6 of orderNumber>, <area or city>", url: "/rider" }`; when an order is taken from a rider (given to someone else, or `riderId: null`) the previous rider gets `"Order reassigned / ऑर्डर बदला गया"`. Assigning the same rider again sends nothing. These messages never contain the customer's phone, the delivery OTP or the door number (the area is address line 2, else the city).
+
+#### Product variants
+
+Same item, different options (Aata 1 kg / 5 kg / 10 kg). A product either sells as before, or **only through its variants**.
+
+- **Product JSON** always has `optionName` (`{ en, hi }` or `null`) and `variants: [{ id, label{en,hi}, sku, mrp, price, stock, images, isDefault, isActive, discountPercent, inStock }]` (`[]` for plain products) — in the list, detail, related, wishlist and admin responses. Customers never receive an inactive variant.
+- **Derived top-level fields**: with variants, `price` / `mrp` / `unit` come from the default variant (`unit` = its English label) and `stock` = total of the **active** variants, set by the backend on every save. Listing, sorting, price / `inStock` filters and suggest need no changes.
+- **Admin** (`POST` / `PATCH /admin/products`): max 20 variants, labels unique (English and Hindi), `sku` unique, exactly one `isDefault` and it must be active, each `price <= mrp`, `optionName` required. On `PATCH`, `variants` is the **complete list**: with `id` = update, without = create, **left out = deleted** (orders keep their own snapshot; carts show the line as unavailable; reorder skips it as `inactive`). Use `isActive: false` to hide a variant without deleting it. `variants: []` turns the product back into a plain one; leave the key out to keep them. `mrp` / `price` / `unit` / `stock` sent together with variants are ignored.
+- **Cart & orders**: a cart line is (product, variant). Order items snapshot `variantId` + `variantLabel`; stock is taken atomically from that variant and returned to it on cancel. `POST /orders/:id/reorder` keeps variants.
+- **Bulk / CSV**: bulk rows take `variantId`; the CSV has one row per variant. On import a row with `variant_id` (or `variant_label_en` / `_hi`) targets one variant (by id, else English label, else created); the CSV never deletes variants; old CSVs without the variant columns still import.
+- **Existing data keeps working** with no migration: products without `variants`, cart lines and order items without `variantId` are plain.
+
+#### Review approval
+
+New reviews are `pending`; only `approved` reviews are listed publicly and counted in `ratingAvg` / `ratingCount` (recomputed on approve / reject / delete). Admins moderate with `GET /admin/reviews?status=pending` and `PATCH /admin/reviews/:id/status`; `GET /admin/stats` has `pendingReviews`. A customer still has one review per product, whatever its status. **Reviews that existed before moderation are marked `approved` automatically** at server start (`src/migrations`, idempotent) or with `npm run migrate` — run one of them once on an existing database, otherwise old reviews would stay hidden.
 
 #### Store settings & serviceable areas — behaviour worth knowing
 
@@ -225,7 +245,7 @@ On an order status change (admin, rider, confirmed payment) every device of the 
 
 Every error response is `{ success: false, data: null, error: { code, message, details? } }`. Stable codes (non-exhaustive — see `src/utils/errorCodes.js` for the full list) so the client can render the right bilingual copy:
 
-`OTP_EXPIRED`, `OTP_INVALID`, `OTP_MAX_ATTEMPTS`, `OTP_SEND_RATE_LIMITED`, `TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, `VALIDATION_ERROR`, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `COUPON_NOT_FOUND`, `COUPON_EXPIRED`, `COUPON_MIN_ORDER`, `COUPON_USAGE_LIMIT_REACHED`, `COUPON_PER_USER_LIMIT_REACHED`, `ADDRESS_NOT_FOUND`, `ORDER_NOT_FOUND`, `ORDER_NOT_CANCELLABLE`, `IDEMPOTENCY_KEY_REQUIRED`, `REVIEW_REQUIRES_DELIVERED_ORDER`, `REVIEW_ALREADY_EXISTS`, `PAYMENT_SIGNATURE_INVALID`, `FORBIDDEN`, `RATE_LIMITED`, `STORE_CLOSED`, `MIN_ORDER_VALUE`, `NOT_SERVICEABLE`, `PINCODE_NOT_FOUND`, `PAYMENT_NOT_REQUIRED`, `ORDER_NOT_PAYABLE`, `PAYMENT_PROVIDER_ERROR`, `PAYMENT_NOT_RETRYABLE`, `PAYMENT_METHOD_NOT_CHANGEABLE`, `INVALID_DELIVERY_OTP`, `DELIVERY_OTP_LOCKED`, `INVALID_ORDER_STATE`, `ORDER_NOT_ASSIGNABLE`, `RIDER_NOT_FOUND`, `MOBILE_ALREADY_REGISTERED`, `ACCOUNT_DISABLED`, `REVIEW_NOT_FOUND`, `PUSH_NOT_CONFIGURED`, `UPLOAD_FAILED`, `FILE_TOO_LARGE`.
+`OTP_EXPIRED`, `OTP_INVALID`, `OTP_MAX_ATTEMPTS`, `OTP_SEND_RATE_LIMITED`, `TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, `VALIDATION_ERROR`, `PRODUCT_NOT_FOUND`, `OUT_OF_STOCK`, `INSUFFICIENT_STOCK`, `COUPON_NOT_FOUND`, `COUPON_EXPIRED`, `COUPON_MIN_ORDER`, `COUPON_USAGE_LIMIT_REACHED`, `COUPON_PER_USER_LIMIT_REACHED`, `ADDRESS_NOT_FOUND`, `ORDER_NOT_FOUND`, `ORDER_NOT_CANCELLABLE`, `IDEMPOTENCY_KEY_REQUIRED`, `REVIEW_REQUIRES_DELIVERED_ORDER`, `REVIEW_ALREADY_EXISTS`, `PAYMENT_SIGNATURE_INVALID`, `FORBIDDEN`, `RATE_LIMITED`, `STORE_CLOSED`, `MIN_ORDER_VALUE`, `NOT_SERVICEABLE`, `PINCODE_NOT_FOUND`, `PAYMENT_NOT_REQUIRED`, `ORDER_NOT_PAYABLE`, `PAYMENT_PROVIDER_ERROR`, `PAYMENT_NOT_RETRYABLE`, `PAYMENT_METHOD_NOT_CHANGEABLE`, `INVALID_DELIVERY_OTP`, `DELIVERY_OTP_LOCKED`, `INVALID_ORDER_STATE`, `ORDER_NOT_ASSIGNABLE`, `RIDER_NOT_FOUND`, `MOBILE_ALREADY_REGISTERED`, `ACCOUNT_DISABLED`, `REVIEW_NOT_FOUND`, `VARIANT_REQUIRED`, `VARIANT_NOT_FOUND`, `PUSH_NOT_CONFIGURED`, `UPLOAD_FAILED`, `FILE_TOO_LARGE`.
 
 ## API spec
 

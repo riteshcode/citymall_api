@@ -53,3 +53,7 @@ export const listReviews = catchAsync(async (req, res) => {
 export const deleteReview = catchAsync(async (req, res) => {
   sendSuccess(res, { data: await reviewService.deleteReview(req.params.id) });
 });
+
+export const moderateReview = catchAsync(async (req, res) => {
+  sendSuccess(res, { data: await reviewService.moderateReview(req.params.id, req.body) });
+});

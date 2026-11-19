@@ -28,7 +28,7 @@ import { createBannerSchema, updateBannerSchema, bannerIdParamSchema } from '../
 import { adminListProductsSchema, adminListUsersSchema } from '../validations/admin.validation.js';
 import { adminListRidersSchema, createRiderSchema, updateRiderSchema } from '../validations/rider.validation.js';
 import { salesReportSchema, topProductsSchema, codReportSchema } from '../validations/report.validation.js';
-import { adminListReviewsSchema, reviewIdParamSchema } from '../validations/review.validation.js';
+import { adminListReviewsSchema, reviewIdParamSchema, moderateReviewSchema } from '../validations/review.validation.js';
 import { updateSettingsSchema } from '../validations/settings.validation.js';
 import {
   listPincodesSchema,
@@ -110,6 +110,7 @@ router.get('/reports/cod', validate(codReportSchema), reportController.cod);
 
 // Reviews moderation
 router.get('/reviews', validate(adminListReviewsSchema), adminController.listReviews);
+router.patch('/reviews/:id/status', validate(moderateReviewSchema), adminController.moderateReview);
 router.delete('/reviews/:id', validate(reviewIdParamSchema), adminController.deleteReview);
 
 // Media uploads (product/category/banner images)

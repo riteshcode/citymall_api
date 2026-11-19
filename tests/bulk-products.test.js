@@ -9,7 +9,9 @@ import { createAuthedUser, createCategory, createProduct, bearer } from './helpe
 const app = createApp();
 const base = env.apiBasePath;
 
+// Old files without the variant columns are still accepted by the import (see the variants tests); the export always writes all of them.
 const HEADER = 'id,slug,title_en,title_hi,category_slug,brand,unit,mrp,price,stock,isActive';
+const EXPORT_HEADER = 'id,variant_id,variant_label_en,variant_label_hi,sku,slug,title_en,title_hi,option_name_en,option_name_hi,category_slug,brand,unit,mrp,price,stock,isActive';
 
 describe('Admin — bulk product update', () => {
   let adminH;
@@ -146,13 +148,19 @@ describe('Admin — product CSV export / import', () => {
       expect(res.headers['content-type']).toMatch(/^text\/csv/);
       expect(res.headers['content-disposition']).toMatch(/^attachment; filename="products-\d{4}-\d{2}-\d{2}\.csv"$/);
       expect(res.body.startsWith('﻿')).toBe(true); // BOM so Excel shows Hindi correctly
-      expect(res.body.split('\r\n')[0].replace('﻿', '')).toBe(HEADER);
+      expect(res.body.split('\r\n')[0].replace('﻿', '')).toBe(EXPORT_HEADER);
 
       const rows = parse(res.body, { bom: true, columns: true });
       expect(rows).toHaveLength(2);
       const byslug = Object.fromEntries(rows.map((r) => [r.slug, r]));
       expect(byslug['atta-5kg']).toEqual({
         id: atta.id,
+        variant_id: '',
+        variant_label_en: '',
+        variant_label_hi: '',
+        sku: '',
+        option_name_en: '',
+        option_name_hi: '',
         slug: 'atta-5kg',
         title_en: 'Atta, "Premium" 5kg', // comma and quotes survive
         title_hi: 'आटा',

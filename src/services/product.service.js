@@ -3,6 +3,8 @@ import { Product } from '../models/Product.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ErrorCodes } from '../utils/errorCodes.js';
 import { escapeRegex } from '../utils/regex.js';
+import { mergeBilingualFields } from '../utils/mongoosePlugins.js';
+import { publicProductJSON } from '../utils/variants.js';
 
 const SORT_STAGES = {
   popular: { ratingCount: -1, ratingAvg: -1 },
@@ -63,7 +65,7 @@ export async function listProducts(filters) {
 
   return {
     // Strip the aggregation-only helper fields so they never reach the client.
-    docs: docs.map(({ _discountPercent, _score, ...rest }) => Product.hydrate(rest).toJSON()),
+    docs: docs.map(({ _discountPercent, _score, ...rest }) => publicProductJSON(Product.hydrate(rest))),
     total,
     page: safePage,
     limit: safeLimit,
@@ -130,4 +132,49 @@ export async function suggestProducts(q, limit = 8) {
       price: p.price,
       image: p.images?.[0] || '',
     }));
+}
+
+
+// ================================================================== admin: create / update (with variants)
+
+export async function createProduct(body) {
+  const product = await Product.create(body);
+  return product;
+}
+
+/**
+ * PATCH semantics: only the keys present change. `variants`, when present, is the COMPLETE list:
+ *   with id    -> that variant is updated (404 VARIANT_NOT_FOUND if the id is not one of this product's)
+ *   without id -> a new variant
+ *   missing    -> deleted. (Orders keep their own label/price snapshot, carts show the line as unavailable and reorder
+ *                 skips it as "inactive" - so a hard delete is safe; use isActive:false to merely hide a variant.)
+ * With variants, price / mrp / unit / stock are derived (model hook), so values sent for them are ignored.
+ */
+export async function updateProduct(id, body) {
+  const product = await Product.findById(id);
+  if (!product) throw ApiError.notFound(ErrorCodes.PRODUCT_NOT_FOUND, 'Product not found');
+
+  const { variants, ...rest } = body;
+  mergeBilingualFields(product, rest, ['title', 'description']);
+  Object.assign(product, rest);
+
+  if (variants !== undefined) {
+    product.variants = variants.map(({ id: variantId, ...fields }) => {
+      if (!variantId) return fields;
+      const existing = product.variants.id(variantId);
+      if (!existing) {
+        throw ApiError.notFound(ErrorCodes.VARIANT_NOT_FOUND, `Variant ${variantId} does not belong to this product`);
+      }
+      return { _id: existing._id, ...fields };
+    });
+  }
+
+  if (product.variants.length === 0 && product.price > product.mrp) {
+    throw ApiError.badRequest(ErrorCodes.VALIDATION_ERROR, 'Request validation failed', [
+      { path: 'price', message: 'price cannot exceed mrp' },
+    ]);
+  }
+
+  await product.save();
+  return product;
 }

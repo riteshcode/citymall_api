@@ -23,9 +23,9 @@ describe('Admin — reviews moderation', () => {
   let rCarol; // 4 stars on biscuits
 
   const review = (user, product, rating, comment = '') =>
-    Review.create({ user: user.user._id, product: product._id, order: new mongoose.Types.ObjectId(), rating, comment });
+    Review.create({ user: user.user._id, product: product._id, order: new mongoose.Types.ObjectId(), rating, comment, status: 'approved' });
   const recompute = async (product) => {
-    const [agg] = await Review.aggregate([{ $match: { product: product._id } }, { $group: { _id: null, avg: { $avg: '$rating' }, n: { $sum: 1 } } }]);
+    const [agg] = await Review.aggregate([{ $match: { product: product._id, status: 'approved' } }, { $group: { _id: null, avg: { $avg: '$rating' }, n: { $sum: 1 } } }]);
     await Product.updateOne({ _id: product._id }, { ratingAvg: agg ? Math.round(agg.avg * 10) / 10 : 0, ratingCount: agg ? agg.n : 0 });
   };
 
@@ -139,7 +139,7 @@ describe('Admin — reviews moderation', () => {
       expect((await request(app).get(`${base}/products/${tea.id}/reviews`)).body.data.map((r) => r.comment)).toEqual(['Great tea']);
       const second = await request(app).post(`${base}/products/${tea.id}/reviews`).set(bearer(bob)).send({ rating: 4, comment: 'better' });
       expect(second.status).toBe(201);
-      expect((await Product.findById(tea.id)).ratingCount).toBe(2);
+      expect((await Product.findById(tea.id)).ratingCount).toBe(1); // the new review is pending: not counted until approved
     });
 
     it('is admin-only', async () => {
